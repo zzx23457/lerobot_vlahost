@@ -26,10 +26,6 @@
    - HTTP 接口的交互式控制脚本
    - 使用 `HOME_LEFT_ARM` 作为 `HTTPArmController.DEFAULT_HOME_LEFT`
 
-3. **`workflows/arm_clear_and_impedance_fixed.py`**
-   - SDK 版本的清错和阻抗设置脚本
-   - 使用 `HOME_LEFT_ARM` 作为 `ArmController.DEFAULT_HOME_LEFT`
-
 ## 如何更新 Home 位置
 
 ### 方法 1: 使用交互式脚本（推荐）
@@ -53,14 +49,16 @@ import sys
 sys.path.insert(0, 'workflows')
 from arm_control_http import HTTPArmController
 
-# 连接并获取当前位置
-controller = HTTPArmController(http_url='http://192.168.15.123:8010')
+# 连接并获取当前位置（默认 http://192.168.10.123:8010，必要时覆盖）
+controller = HTTPArmController(http_url='http://192.168.10.123:8010')
 if controller.connect():
     state = controller.get_current_state()
-    if state:
+    if state and state['arm_joints']:
         left_arm = state['arm_joints'][:7]
         print("当前左臂位置:", left_arm)
         print("\n将这个值更新到 workflows/_robot_home_config.py 的 HOME_LEFT_ARM")
+    else:
+        print("未能获取关节位置，检查 /state 是否返回 joint_states.positions")
 ```
 
 ### 更新步骤
@@ -114,7 +112,7 @@ print('是否一致:', HOME_LEFT_ARM == HTTPArmController.DEFAULT_HOME_LEFT)
 ## 相关文件
 
 - `workflows/_robot_home_config.py` - 中心配置（唯一真相源）
-- `workflows/_robot_home.py` - deploy 归位逻辑
+- `workflows/_robot_home.py` - deploy / replay 退出钩子（HTTP-only 路径不
+  下使能；Hybrid 路径会下使能）
 - `workflows/arm_control_http.py` - HTTP 交互式控制
-- `workflows/arm_clear_and_impedance_fixed.py` - SDK 清错脚本
 - `workflows/robot_interaction/deploy.py` - 部署主入口

@@ -12,11 +12,16 @@
 ## HTTP 服务器测试
 
 ```bash
-# 测试服务器是否响应
-curl http://192.168.10.123:8010/observation
+# 测试服务器是否响应（端点是 /state，不是 /observation）
+curl http://192.168.10.123:8010/state | python3 -m json.tool | head -30
 
-# 应该返回类似：
-# {"joints": [0.0, -0.523, ...], "images": {"right_eye": "...", ...}}
+# 应该返回类似（不同服务端版本字段略有差异，但 joint_states.positions 必须存在）：
+# {
+#   "joint_states": {"positions": [14 floats, radians], ...},
+#   "gripper_left":  ...,
+#   "gripper_right": ...,
+#   "quad_image":    {"format": "jpeg", "data": "..."} 或 {"stream_url": "..."}
+# }
 ```
 
 ## 配置文件检查
@@ -42,19 +47,39 @@ curl http://192.168.10.123:8010/observation
 
 ```bash
 cd /home/zzx23457/lerobot_vlahost
-python workflows/robot_interaction/test_http_robot.py
+
+# 1a. 轻量导入验证（不需要真机）
+uv run python -c "from lerobot.robots.marvain_m6_http import MarvainM6HttpRobotConfig, MarvainM6HttpRobot; print('import ok')"
+
+# 1b. 无真机时启动 mock echo server（默认监听 0.0.0.0:8010）
+python workflows/robot_interaction/mock_echo_server.py --port 8010
+
+# 1c. 端到端冒烟测试（向真实 / mock 服务端拉一次状态）
+curl -s http://192.168.10.123:8010/state | python3 -m json.tool | head -30
 ```
 
-**预期输出**：
+**预期 1a 输出**：
 ```
-✓ 成功导入 MarvainM6Http 和 MarvainM6HttpRobotConfig
-✓ 配置创建成功: robot_id=test_robot, url=http://192.168.10.123:8010
-✓ 机器人实例化成功: test_robot MarvainM6Http
-✓ 连接成功！
-✓ 获取观测成功，包含 19 个键
-✓ 动作发送成功
-✓ 断开成功
-✅ 所有测试通过！
+import ok
+```
+
+**预期 1b 输出**：
+```
+mock echo server on http://0.0.0.0:8010  (GET /state, POST /action, POST /action_chunk)
+INFO:     Started server process [...]
+INFO:     Uvicorn running on http://0.0.0.0:8010
+```
+
+**预期 1c 输出**（必须有 `joint_states.positions`，否则驱动无法工作）：
+```json
+{
+  "joint_states": {
+    "positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  },
+  "gripper_left":  ...,
+  "gripper_right": ...,
+  "quad_image":    ...
+}
 ```
 
 ### 2. 回放测试（推荐先做这个）

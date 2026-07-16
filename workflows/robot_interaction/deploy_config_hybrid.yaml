@@ -7,6 +7,13 @@
 # workflows/workflows_sdk/robot_interaction/deploy_config.yaml (SDK-only).
 
 # ============================================================================
+# Mode (deploy / replay / camera_preview) — used by the UI to know which
+# workflow to launch. deploy.py / replay.py / show_cameras.py themselves do
+# not read this field; they are selected by which script you invoke.
+# ============================================================================
+mode: deploy
+
+# ============================================================================
 # Policy Configuration
 # ============================================================================
 policy:

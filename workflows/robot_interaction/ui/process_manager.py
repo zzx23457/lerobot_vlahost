@@ -2,6 +2,12 @@
 
 This module manages the lifecycle of deploy.py, replay.py, and show_cameras.py
 subprocesses, including launching, monitoring, log streaming, and cleanup.
+
+All three scripts accept a yaml config via ``--config``. The UI serializes
+the current ``UnifiedRobotConfig`` to a temp yaml and passes it as
+``--config <tmp>``. Camera preview keeps a few CLI-only runtime params
+(``--cameras`` / ``--fps`` / ``--show-quad`` / ``--window-size``) because
+``show_cameras.py`` does not yet expose them in yaml.
 """
 
 import atexit
@@ -16,7 +22,7 @@ from collections import deque
 from pathlib import Path
 from typing import Literal
 
-from .config_manager import UnifiedRobotConfig, to_cli_args
+from .config_manager import UnifiedRobotConfig, dump_to_tempfile
 
 
 class ProcessManager:
@@ -56,50 +62,56 @@ class ProcessManager:
             log_queue.put(f"[ERROR] Log streaming error: {e}")
 
     def launch_deploy(self, config: UnifiedRobotConfig) -> tuple[bool, str]:
-        """Launch deploy.py with config"""
-        return self._launch_script("deploy", "deploy.py", config)
+        """Launch deploy.py with config (serialized to a temp yaml)."""
+        tmp = dump_to_tempfile(config)
+        return self._launch_script(
+            "deploy",
+            "deploy.py",
+            config,
+            custom_args=["--config", str(tmp)],
+        )
 
     def launch_replay(self, config: UnifiedRobotConfig) -> tuple[bool, str]:
-        """Launch replay.py with config"""
-        return self._launch_script("replay", "replay.py", config)
+        """Launch replay.py with config (serialized to a temp yaml)."""
+        tmp = dump_to_tempfile(config)
+        return self._launch_script(
+            "replay",
+            "replay.py",
+            config,
+            custom_args=["--config", str(tmp)],
+        )
 
     def launch_camera_preview(self, config: UnifiedRobotConfig) -> tuple[bool, str]:
-        """Launch show_cameras.py with config"""
-        # Build args for show_cameras
-        args = [
-            "--http-base-url", config.robot.http_base_url,
-        ]
+        """Launch show_cameras.py with config (yaml for robot/policy,
+        CLI override for camera runtime params not exposed in yaml).
+        """
+        tmp = dump_to_tempfile(config)
+        args = ["--config", str(tmp)]
 
-        if config.policy and config.policy.path:
-            args.extend(["--policy-path", config.policy.path])
-
-        if config.inference and config.inference.rename_map:
-            import json
-            args.extend(["--rename-map", json.dumps(config.inference.rename_map)])
-
-        # 添加相机列表
+        # show_cameras.py 仍通过 CLI 接 camera_list / camera_fps /
+        # show_quad / window_size（其 yaml schema 没暴露这 4 个）。
         if config.runtime.camera_list:
-            args.append("--cameras")
-            args.extend(config.runtime.camera_list)
-        # 如果没有指定，show_cameras.py 会自动使用所有相机
+            args.extend(["--cameras", *config.runtime.camera_list])
 
-        # 添加 FPS
         if config.runtime.camera_fps:
             args.extend(["--fps", str(int(config.runtime.camera_fps))])
 
-        # 添加四宫格选项
         if config.runtime.show_quad:
             args.append("--show-quad")
 
-        # 添加窗口尺寸 (注意：--window-size 接受两个参数 W H)
         if config.runtime.window_width and config.runtime.window_height:
             args.extend([
                 "--window-size",
                 str(int(config.runtime.window_width)),
-                str(int(config.runtime.window_height))
+                str(int(config.runtime.window_height)),
             ])
 
-        return self._launch_script("camera_preview", "show_cameras.py", config, custom_args=args)
+        return self._launch_script(
+            "camera_preview",
+            "show_cameras.py",
+            config,
+            custom_args=args,
+        )
 
     def _launch_script(
         self,
@@ -121,11 +133,12 @@ class ProcessManager:
 
         # Build command
         cmd = [sys.executable, str(script_path)]
-
-        if custom_args:
-            cmd.extend(custom_args)
-        else:
-            cmd.extend(to_cli_args(config))
+        # 所有 launch_* 现在都通过 custom_args 传 --config（yaml-centric 架构）。
+        if custom_args is None:
+            raise RuntimeError(
+                f"{process_name}: custom_args is required (yaml-centric 架构要求 --config)"
+            )
+        cmd.extend(custom_args)
 
         # Initialize log structures
         self.log_queues[process_name] = queue.Queue()

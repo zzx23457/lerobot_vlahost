@@ -171,7 +171,10 @@
       "Bash(grep -n \"chunk_payload\\\\|body = {\\\\|self._session.post\\\\|payload, result = self._prepare_action\" src/lerobot/robots/marvain_m6_http/marvain_m6_http.py)",
       "Bash(python3 -m py_compile vlahost/server.py)",
       "Read(//home/zzx23457/vlahost/src/vlahost/launch/**)",
-      "Bash(grep -n \"^import\\\\|^from\" /home/zzx23457/vlahost/src/vlahost/vlahost/server.py | head -20)"
+      "Bash(grep -n \"^import\\\\|^from\" /home/zzx23457/vlahost/src/vlahost/vlahost/server.py | head -20)",
+      "Bash(cd /home/zzx23457/lerobot_vlahost/workflows && rm -v API_FIX_CRITICAL.md API_UPDATE.md ARM_CONTROL_FIX.md CONFIG_COMPARISON.md CRITICAL_FIX_SUMMARY.md DATASET_COMPATIBILITY.md DEPLOY_REPLAY_VERIFIED.md FINAL_UPDATE.md GRIPPER_UPDATE.md PROJECT_COMPLETE.md SUMMARY.md TEST_REPORT.md)",
+      "Bash(env)",
+      "Bash(env -u ALL_PROXY -u all_proxy -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy python -c ' *)"
     ],
     "additionalDirectories": [
       "/home/zzx23457/lerobot_vlahost/src/lerobot/robots",
@@ -180,7 +183,8 @@
       "/home/zzx23457/lerobot_vlahost/src/lerobot/robots/marvain_m6_http",
       "/home/zzx23457/vlahost",
       "/home/zzx23457/vlahost/src/vlahost/vlahost",
-      "/home/zzx23457/vlahost/src/vlahost/launch"
+      "/home/zzx23457/vlahost/src/vlahost/launch",
+      "/home/zzx23457/lerobot_vlahost/workflows"
     ]
   }
 }

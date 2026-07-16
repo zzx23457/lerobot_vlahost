@@ -2,33 +2,34 @@
 
 ## 文件对比
 
-### 原始版本（SDK）
-- **文件**: `arm_clear_and_impedance_fixed.py`
-- **接口**: 原生 SDK (`fx_robot`, `Marvin_Robot`, `DCSS`)
-- **功能**: 完整（错误清除、阻抗模式、拖动模式、扭矩控制）
-
-### HTTP 版本（简化）
+### HTTP 版本（推荐）
 - **文件**: `arm_control_http.py`
 - **接口**: HTTP API (`http://192.168.10.123:8010`)
-- **功能**: 基础位置控制
+- **功能**: 基础位置控制 + 夹爪独立控制
+
+> 项目内不再保留 SDK 版本的控制脚本（如 `arm_clear_and_impedance_fixed.py` 已被删除）。
+> 如果需要阻抗模式、拖动示教、扭矩控制等高级功能，请直接通过服务端 HTTP 接口扩展，
+> 或接入其他支持 SDK 的工具。
 
 ## 功能对比
 
-| 功能 | SDK 版本 | HTTP 版本 | 说明 |
-|------|----------|-----------|------|
-| 连接测试 | ✅ | ✅ | HTTP: 简单GET请求 |
-| 查看关节位置 | ✅ | ✅ | 16关节（14臂+2夹爪） |
-| 移动到位置 | ✅ | ✅ | HTTP: 直接目标，无速度控制 |
-| Home 位置 | ✅ | ✅ | 使用相同的默认值 |
-| 保存/加载位置 | ❌ | ✅ | HTTP版本新增 |
-| 错误检查/清除 | ✅ | ❌ | HTTP不支持 |
-| 关节阻抗模式 | ✅ | ❌ | HTTP不支持 |
-| 笛卡尔阻抗模式 | ✅ | ❌ | HTTP不支持 |
-| 拖动模式 | ✅ | ❌ | HTTP不支持 |
-| 扭矩控制 | ✅ | ❌ | HTTP不支持 |
-| 速度/加速度设置 | ✅ | ❌ | HTTP不支持 |
-| 状态查询 | ✅ | ❌ | HTTP不支持 |
-| 伺服错误码 | ✅ | ❌ | HTTP不支持 |
+| 功能 | HTTP 版本 | 说明 |
+|------|----------|------|
+| 连接测试 | ✅ | `GET /state` 请求 |
+| 查看关节位置 | ✅ | 16 关节（14 臂 + 2 夹爪） |
+| 移动到位置 | ✅ | 直接目标，无速度控制 |
+| 单臂 home | ✅ | 通过"目标=当前位置"保持另一臂不动 |
+| 双臂同时 home | ✅ | |
+| 独立夹爪控制 | ✅ | 选项 12/13，只动夹爪 |
+| 保存/加载位置 | ✅ | |
+| 错误检查/清除 | ❌ | HTTP 不支持 |
+| 关节阻抗模式 | ❌ | HTTP 不支持 |
+| 笛卡尔阻抗模式 | ❌ | HTTP 不支持 |
+| 拖动模式 | ❌ | HTTP 不支持 |
+| 扭矩控制 | ❌ | HTTP 不支持 |
+| 速度/加速度设置 | ❌ | HTTP 不支持 |
+| 状态查询 | ❌ | HTTP 不支持 |
+| 伺服错误码 | ❌ | HTTP 不支持 |
 
 ## HTTP 版本使用方法
 
@@ -38,90 +39,109 @@
 # 运行脚本
 python workflows/arm_control_http.py
 
-# 输入HTTP服务器地址（或直接回车使用默认）
-HTTP 服务器地址 (默认 http://192.168.10.123:8010): 
+# 默认连 http://192.168.10.123:8010，按回车即可
 ```
 
-### 主要功能
+### 菜单选项
+
+```
+ 1. 查看当前位置（16 关节）
+ 2. A 臂回到 home 位置（B 臂保持不动）
+ 3. B 臂回到 home 位置（A 臂保持不动）
+ 4. 两个臂同时回到 home 位置
+ 5. 移动到自定义位置（输入 14 个臂关节）
+ 6. 保存当前位置
+ 7. 加载保存的位置
+ 8. 列出所有保存的位置
+ 9. 删除保存的位置
+10. 保存位置到文件
+11. 从文件加载位置
+12. 设置左夹爪位置（保持臂和右夹爪不动）
+13. 设置右夹爪位置（保持臂和左夹爪不动）
+ 0. 退出程序
+```
 
 #### 1. 查看当前位置
 ```
-选项 1: 查看当前位置（16关节）
-输出:
-  A臂 (左臂): [66.05, -19.00, -80.62, -84.70, -47.02, 31.47, -40.16]
-  B臂 (右臂): [-66.05, -19.00, 80.62, -84.70, 47.02, 31.47, 40.16]
-  左夹爪: -1.34°
-  右夹爪: -0.30°
+A 臂（左臂）: [66.05, -19.00, -80.62, -84.70, -47.02, 31.47, -40.16]
+B 臂（右臂）: [-66.05, -19.00, 80.62, -84.70, 47.02, 31.47, 40.16]
+左夹爪: -1.34°
+右夹爪: -0.30°
 ```
 
-#### 2. 回到 Home 位置
+#### 2-4. Home
+- 选项 2/3：单臂回 home，另一臂保持当前位
+- 选项 4：两个臂同时回 home
+
+#### 5. 移动到自定义位置
 ```
-选项 2/3: A臂/B臂回到 home 位置
-注意: HTTP接口会立即移动，无法控制速度
+输入 14 个臂关节角度（度数），用逗号或空格分隔:
+  前 7 个 = A 臂（左臂），后 7 个 = B 臂（右臂）
+关节角度: 60, -20, -75, -80, -45, 30, -35, -60, -20, 75, -80, 45, 30, 35
+
+是否同时设置夹爪? (y/n, 默认 n 保持当前)
 ```
 
-#### 3. 移动到自定义位置
-```
-选项 4: 移动到自定义位置
-输入14个臂关节角度，用逗号或空格分隔:
-  前7个 = A臂（左臂），后7个 = B臂（右臂）
+#### 12/13. 独立夹爪控制
 
-示例:
-60, -20, -75, -80, -45, 30, -35, -60, -20, 75, -80, 45, 30, 35
+夹爪常因臂抖动难以独立评估，这两个选项只动夹爪、臂完全保持当前位，便于隔离测试。
+可指定连续发送次数和频率（默认 1 次；>1 时按 30 Hz 循环发送）。
+
+#### 6-11. 保存/加载位置
+- 选项 6/7：按名称保存在内存里
+- 选项 8/9：列出/删除
+- 选项 10/11：保存/加载到文件（默认 `saved_positions.json`）
+
+## HTTP payload 格式
+
+`arm_control_http.py` 用的是驱动同款 payload（见
+`src/lerobot/robots/marvain_m6_http/marvain_m6_http.py:_prepare_action`）：
+
+```json
+POST /action
+{
+  "jointcmd_left":  [7 floats, radians],   // 左臂
+  "jointcmd_right": [7 floats, radians],   // 右臂
+  "gripper_left":   <float, radians>,      // 单个值，不是数组
+  "gripper_right":  <float, radians>
+}
 ```
 
-#### 4. 保存/加载位置
-```
-选项 5: 保存当前位置
-输入名称: my_position_1
-
-选项 6: 加载保存的位置
-输入位置名称: my_position_1
-
-选项 9/10: 保存/加载到文件
-文件名: saved_positions.json
-```
+> ⚠️ 用 `joint_left` / `joint_right` 会被服务端静默丢弃，机器人不动 —— 这是早期
+> home 指令无效的根因。
 
 ## HTTP API 限制
 
 ### ❌ 不支持的功能
 
-由于 HTTP 接口只提供基础的位置读取和控制，以下功能**无法实现**：
+由于 HTTP 接口只提供基础的位置读取和控制：
 
 1. **阻抗控制**: 无法设置刚度和阻尼参数
 2. **拖动模式**: 无法手动拖动机械臂
-3. **扭矩控制**: 只能位置控制，无法直接控制扭矩
+3. **扭矩控制**: 只能位置控制
 4. **错误处理**: 无法查询或清除错误码
 5. **状态管理**: 无法查询当前控制模式（下伺服/位置/扭矩等）
-6. **速度控制**: 动作直接执行，无法设置速度和加速度
+6. **速度控制**: 动作直接执行（驱动器内部 `max_relative_target_deg` 提供软限速）
 7. **限位处理**: 无法检测或处理限位问题
 
 ### 解决方案
-
-如果需要这些高级功能，有几个选择：
 
 #### 方案 1: HTTP 服务器端增强（推荐）
 让同事在 HTTP 服务器端添加这些功能的 API 端点：
 
 ```python
-# 建议的新端点
 POST /mode/impedance    # 设置阻抗模式
 POST /mode/drag         # 设置拖动模式
 POST /clear_error       # 清除错误
-GET  /status           # 获取详细状态
-POST /action_with_vel  # 带速度的动作
+GET  /status            # 获取详细状态
+POST /action_with_vel   # 带速度的动作
 ```
 
-#### 方案 2: 继续使用 SDK 版本
-对于需要高级控制的场景（拖动示教、阻抗控制），继续使用原始 SDK 版本：
-
-```bash
-python workflows/arm_clear_and_impedance_fixed.py
-```
-
-#### 方案 3: 混合使用
-- **简单位置控制**: 使用 HTTP 版本（`arm_control_http.py`）
-- **高级功能**: 使用 SDK 版本（`arm_clear_and_impedance_fixed.py`）
+#### 方案 2: 通过 Hybrid 路径
+如果只想加 SDK 侧的电机控制/下使能，而观测仍走 HTTP，可以参考
+`_robot_home.py` 里的 `robot_type == "marvain_m6_hybrid"` 分支——
+`Hybrid` 路径会用 SDK 的 `send_action` 而非 HTTP。Hybrid 配置文件：
+`workflows/robot_interaction/deploy_config_hybrid.yaml`。
 
 ## 使用建议
 
@@ -131,8 +151,9 @@ python workflows/arm_clear_and_impedance_fixed.py
 ✅ 测试关节运动范围
 ✅ 简单的位置序列
 ✅ 数据收集（读取位置）
+✅ 独立夹爪控制（选项 12/13）
 
-### 需要 SDK 版本的场景
+### 当前 HTTP 版本还不支持的场景
 ❌ 手动拖动示教
 ❌ 柔顺控制
 ❌ 错误排查
@@ -146,66 +167,34 @@ python workflows/arm_clear_and_impedance_fixed.py
 1. **无速度控制**: 机械臂会以最大速度移动到目标
 2. **无错误反馈**: 如果出错，无法从 HTTP 接口得知
 3. **无碰撞检测**: 需要手动确保路径安全
-4. **无限位保护**: 可能超出安全范围
+4. **无限位保护**: 可能超出安全范围（驱动器内部 `max_relative_target_deg`
+   提供每步最大位移软限速，但不替代真实限位）
 
 **使用建议**：
 - 首次测试时使用小幅度移动
 - 确保周围无障碍物
-- 准备好急停按钮
+- 准备好急停按钮（`Ctrl+C` 退出程序）
 - 不要在生产环境使用
 
 ## 示例：典型工作流
 
-### 场景 1: 位置示教
-```bash
-# 1. 使用 SDK 版本进入拖动模式
-python workflows/arm_clear_and_impedance_fixed.py
-# 选择: 8. B臂进入拖动模式
-# 手动拖动到目标位置
-
-# 2. 使用 HTTP 版本保存位置
-python workflows/arm_control_http.py
-# 选择: 5. 保存当前位置
-# 输入名称: position_1
-
-# 3. 回放位置
-# 选择: 6. 加载保存的位置
-```
+### 场景 1: 位置示教（手动把臂拖到目标位）
+当前 HTTP 接口不支持拖动示教模式。常见做法：
+1. 在服务端开一个临时示教端点（POST `/mode/drag` + POST `/mode/position`），
+   通过 HTTP 切到拖动模式；
+2. 或者直接用 Hybrid 路径（`deploy_config_hybrid.yaml`），由 SDK 提供拖动支持；
+3. 拖到位后用 HTTP 版本保存：
+   ```bash
+   python workflows/arm_control_http.py
+   # 选择: 6. 保存当前位置
+   # 输入名称: position_1
+   ```
 
 ### 场景 2: 错误恢复
-```bash
-# 1. 使用 SDK 版本清除错误
-python workflows/arm_clear_and_impedance_fixed.py
-# 选择: 2. 检查并清除B臂错误
-
-# 2. 使用 HTTP 版本回到 home
-python workflows/arm_control_http.py
-# 选择: 3. B臂回到 home 位置
-```
-
-## 未来改进
-
-如果 HTTP 服务器端添加了更多功能，可以扩展 `arm_control_http.py`：
-
-```python
-# 可能的扩展
-def enter_impedance_mode(self, arm='B'):
-    response = self.session.post(
-        f"{self.http_url}/mode/impedance",
-        json={"arm": arm, "K": [...], "D": [...]}
-    )
-
-def enter_drag_mode(self, arm='B'):
-    response = self.session.post(
-        f"{self.http_url}/mode/drag",
-        json={"arm": arm, "type": 1}
-    )
-
-def get_detailed_status(self):
-    response = self.session.get(f"{self.http_url}/status")
-    return response.json()  # 包含错误码、状态等
-```
+HTTP 接口不暴露错误码。建议：
+1. 在服务端增加错误查询端点（GET `/errors` 或类似）；
+2. 或者重启服务端进程（最简单，但会断连当前会话）。
 
 ---
 
-**总结**：HTTP 版本适合基础操作，高级功能仍需 SDK 版本。根据实际需求选择合适的工具。
+**总结**：HTTP 版本适合基础操作和夹爪独立测试；高级功能需要服务端扩展或走 Hybrid 路径。

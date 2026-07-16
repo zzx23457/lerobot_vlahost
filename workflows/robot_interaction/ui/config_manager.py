@@ -5,9 +5,9 @@ deploy, replay, and camera preview workflows.
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 import yaml
 
 
@@ -49,11 +49,11 @@ class RobotConfig:
     action_clip_margin_deg: float = 5.0
     max_relative_target_deg: float = 10.0
     joint_names: list[str] = field(default_factory=lambda: [
-        "left_arm_joint1", "left_arm_joint2", "left_arm_joint3", "left_arm_joint4",
-        "left_arm_joint5", "left_arm_joint6", "left_arm_joint7",
-        "right_arm_joint1", "right_arm_joint2", "right_arm_joint3", "right_arm_joint4",
-        "right_arm_joint5", "right_arm_joint6", "right_arm_joint7",
-        "left_gripper", "right_gripper"
+        "left_arm_joint_1", "left_arm_joint_2", "left_arm_joint_3", "left_arm_joint_4",
+        "left_arm_joint_5", "left_arm_joint_6", "left_arm_joint_7",
+        "right_arm_joint_1", "right_arm_joint_2", "right_arm_joint_3", "right_arm_joint_4",
+        "right_arm_joint_5", "right_arm_joint_6", "right_arm_joint_7",
+        "left_gripper", "right_gripper",
     ])
 
 
@@ -67,7 +67,7 @@ class RTCConfig:
 @dataclass
 class InferenceConfig:
     """Inference configuration (deploy mode only)"""
-    type: Literal["sync", "rtc"] = "sync"
+    type: Literal["sync", "rtc", "chunk"] = "sync"
     strategy: Literal["base", "sentry", "highlight", "dagger", "episodic"] = "base"
     fps: float = 30.0
     duration: float = 0.0  # 0 = infinite
@@ -79,6 +79,11 @@ class InferenceConfig:
     compile_warmup_inferences: int = 2
     show_cameras: bool = False
     rtc: RTCConfig = field(default_factory=RTCConfig)
+    # chunk 模式专属（open-loop：每 chunk_interval_s 推理一次，把前
+    # n_action_steps 个 action 一次性发给机器人）。deploy.py:411-417
+    # 把这两个拼成 --inference.n_action_steps / --inference.chunk_interval_s。
+    n_action_steps: int | None = None
+    chunk_interval_s: float | None = None
     rename_map: dict[str, str] = field(default_factory=dict)
 
 
@@ -206,87 +211,6 @@ def validate(config: UnifiedRobotConfig) -> list[str]:
 
 
 # ============================================================================
-# CLI Argument Conversion
-# ============================================================================
-
-def to_cli_args(config: UnifiedRobotConfig) -> list[str]:
-    """Convert unified config to deploy.py / replay.py CLI arguments"""
-    args = []
-
-    if config.mode == "deploy":
-        if config.policy and config.policy.path:
-            args.extend(["--policy-path", config.policy.path])
-        if config.policy and config.policy.device:
-            args.extend(["--device", config.policy.device])
-
-        if config.inference:
-            args.extend(["--fps", str(config.inference.fps)])
-            args.extend(["--strategy", config.inference.strategy])
-            args.extend(["--inference-type", config.inference.type])
-
-            if config.inference.type == "rtc" and config.inference.rtc and config.inference.rtc.execution_horizon:
-                args.extend(["--execution-horizon", str(config.inference.rtc.execution_horizon)])
-
-            if config.inference.type == "rtc" and config.inference.rtc and config.inference.rtc.max_guidance_weight is not None:
-                args.extend(["--max-guidance-weight", str(config.inference.rtc.max_guidance_weight)])
-
-            if config.inference.duration > 0:
-                args.extend(["--duration", str(config.inference.duration)])
-
-            if config.inference.interpolation_multiplier != 1:
-                args.extend(["--interpolation-multiplier", str(config.inference.interpolation_multiplier)])
-
-            if config.inference.use_torch_compile:
-                args.append("--use-torch-compile")
-
-            if config.inference.rename_map:
-                args.extend(["--rename-map", json.dumps(config.inference.rename_map)])
-
-            if config.inference.show_cameras:
-                args.append("--show-cameras")
-
-        if config.dataset and config.dataset.single_task:
-            args.extend(["--single-task", config.dataset.single_task])
-
-        if config.dataset and config.dataset.repo_id:
-            args.extend(["--repo-id", config.dataset.repo_id])
-
-        if config.dataset and config.dataset.root:
-            args.extend(["--dataset-root", config.dataset.root])
-
-    elif config.mode == "replay":
-        if config.dataset:
-            if config.dataset.repo_id:
-                args.extend(["--repo-id", config.dataset.repo_id])
-            if config.dataset.episode is not None:
-                args.extend(["--episode", str(config.dataset.episode)])
-            args.extend(["--fps", str(config.dataset.fps)])
-
-            if config.dataset.root:
-                args.extend(["--dataset-root", config.dataset.root])
-
-    # Common args
-    args.extend(["--http-base-url", config.robot.http_base_url])
-    args.extend(["--robot-id", config.robot.robot_id])
-
-    # Robot safety settings
-    if config.robot.safety_stats_path:
-        args.extend(["--safety-stats-path", config.robot.safety_stats_path])
-
-    # 始终传递 return_to_initial 参数
-    args.append("--return-to-initial")
-    args.append(str(config.runtime.return_to_initial_position))
-
-    if config.mode == "replay":
-        if config.runtime.play_sounds:
-            args.append("--play-sounds")
-        else:
-            args.append("--no-sounds")
-
-    return args
-
-
-# ============================================================================
 # YAML Serialization
 # ============================================================================
 
@@ -309,105 +233,195 @@ def _dataclass_to_dict(obj):
     return result
 
 
+def _filter_dataclass_fields(cls: type, data: dict[str, Any]) -> dict[str, Any]:
+    """Filter out fields not declared on the dataclass (for forward compat with
+    hybrid yaml and unknown schema fields)."""
+    if not data:
+        return {}
+    valid = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in valid}
+
+
 def save_yaml(config: UnifiedRobotConfig, filepath: Path | str) -> None:
-    """Save config to YAML file"""
+    """Save config to YAML in the schema expected by deploy.py / replay.py.
+
+    Mode-aware:
+      - deploy: writes `inference.return_to_initial_position` (from RuntimeConfig)
+      - replay: writes root-level `play_sounds` and `return_to_initial_position`
+      - camera_preview: only writes robot + policy (camera runtime params go via CLI)
+    """
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert to dict
-    config_dict = {
+    config_dict: dict[str, Any] = {
         "mode": config.mode,
         "robot": _dataclass_to_dict(config.robot),
-        "runtime": _dataclass_to_dict(config.runtime),
     }
 
-    if config.policy:
-        config_dict["policy"] = _dataclass_to_dict(config.policy)
+    if config.mode == "deploy":
+        if config.policy:
+            config_dict["policy"] = _dataclass_to_dict(config.policy)
+        if config.inference:
+            inference_dict = _dataclass_to_dict(config.inference)
+            # deploy.py reads inference.return_to_initial_position (deploy.py:392)
+            inference_dict["return_to_initial_position"] = (
+                config.runtime.return_to_initial_position
+            )
+            config_dict["inference"] = inference_dict
+        if config.dataset:
+            config_dict["dataset"] = _dataclass_to_dict(config.dataset)
 
-    if config.inference:
-        config_dict["inference"] = _dataclass_to_dict(config.inference)
+    elif config.mode == "replay":
+        if config.dataset:
+            config_dict["dataset"] = _dataclass_to_dict(config.dataset)
+        # replay.py expects root-level play_sounds / return_to_initial_position
+        config_dict["play_sounds"] = config.runtime.play_sounds
+        config_dict["return_to_initial_position"] = config.runtime.return_to_initial_position
 
-    if config.dataset:
-        config_dict["dataset"] = _dataclass_to_dict(config.dataset)
+    elif config.mode == "camera_preview":
+        # show_cameras.py reads http_base_url from yaml.robot and policy.path
+        if config.policy and config.policy.path:
+            config_dict["policy"] = {"path": config.policy.path}
 
     with open(filepath, "w") as f:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False, indent=2)
 
 
 def load_yaml(filepath: Path | str) -> UnifiedRobotConfig:
-    """Load config from YAML file"""
+    """Load config from YAML. Mode-aware + tolerant of unknown fields.
+
+    Returns a UnifiedRobotConfig whose runtime / inference / policy fields are
+    populated according to the file's `mode` key (default: deploy).
+    """
     filepath = Path(filepath)
 
     if not filepath.exists():
         raise FileNotFoundError(f"Config file not found: {filepath}")
 
     with open(filepath, "r") as f:
-        data = yaml.safe_load(f)
+        data = yaml.safe_load(f) or {}
 
-    # Parse nested configs
-    robot_data = data.get("robot", {})
-    cameras_data = robot_data.get("cameras", {})
-    cameras = {name: CameraConfig(**cam) for name, cam in cameras_data.items()}
+    mode = data.get("mode", "deploy")
+
+    # Robot (tolerant of hybrid-only fields like robot.ip / control_mode)
+    robot_data = _filter_dataclass_fields(RobotConfig, data.get("robot", {}) or {})
+    cameras_data = robot_data.get("cameras", {}) or {}
+    cameras = {
+        name: CameraConfig(**_filter_dataclass_fields(CameraConfig, cam or {}))
+        for name, cam in cameras_data.items()
+    }
     robot_data["cameras"] = cameras
     robot = RobotConfig(**robot_data)
 
-    # 加载 runtime，过滤掉已删除的字段（如 show_cameras）
-    runtime_data = data.get("runtime", {})
-    # 移除 show_cameras 字段（如果存在）- 这是旧配置文件可能有的字段
-    runtime_data.pop("show_cameras", None)
-    runtime = RuntimeConfig(**runtime_data)
+    # Policy
+    policy_data = _filter_dataclass_fields(PolicyConfig, data.get("policy") or {})
+    policy = PolicyConfig(**policy_data) if policy_data else PolicyConfig()
 
-    policy_data = data.get("policy")
-    policy = PolicyConfig(**policy_data) if policy_data else None
-
-    inference_data = data.get("inference")
+    # Inference
+    inference_data = _filter_dataclass_fields(InferenceConfig, data.get("inference") or {})
+    return_to_initial_from_inference: bool | None = None
+    if "return_to_initial_position" in (data.get("inference") or {}):
+        return_to_initial_from_inference = data["inference"]["return_to_initial_position"]
     if inference_data:
-        rtc_data = inference_data.get("rtc", {})
+        rtc_raw = inference_data.pop("rtc", None) or {}
+        rtc_data = _filter_dataclass_fields(RTCConfig, rtc_raw)
         inference_data["rtc"] = RTCConfig(**rtc_data)
         inference = InferenceConfig(**inference_data)
     else:
-        inference = None
+        inference = InferenceConfig()
 
-    dataset_data = data.get("dataset")
-    dataset = DatasetConfig(**dataset_data) if dataset_data else None
+    # Dataset
+    dataset_data = _filter_dataclass_fields(DatasetConfig, data.get("dataset") or {})
+    dataset = DatasetConfig(**dataset_data) if dataset_data else DatasetConfig()
+
+    # Runtime — populated differently per mode
+    if mode == "deploy":
+        return_to_initial = (
+            return_to_initial_from_inference
+            if return_to_initial_from_inference is not None
+            else True
+        )
+        runtime = RuntimeConfig(
+            return_to_initial_position=return_to_initial,
+            play_sounds=True,
+        )
+    elif mode == "replay":
+        runtime = RuntimeConfig(
+            return_to_initial_position=data.get("return_to_initial_position", True),
+            play_sounds=data.get("play_sounds", True),
+        )
+    else:  # camera_preview or unknown
+        runtime = RuntimeConfig()
 
     return UnifiedRobotConfig(
-        mode=data.get("mode", "deploy"),
+        mode=mode,
         robot=robot,
-        runtime=runtime,
         policy=policy,
         inference=inference,
         dataset=dataset,
+        runtime=runtime,
     )
 
 
+def dump_to_tempfile(config: UnifiedRobotConfig) -> Path:
+    """Serialize config to a temp yaml file. Returns the path."""
+    import tempfile
+    import time
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    tmp = Path(tempfile.gettempdir()) / f"robot_config_{timestamp}.yaml"
+    save_yaml(config, tmp)
+    return tmp
+
+
 # ============================================================================
-# Preset Management
+# Template Management
 # ============================================================================
 
-def list_presets(presets_dir: Path | str | None = None) -> list[str]:
-    """List available config presets"""
-    if presets_dir is None:
-        presets_dir = Path(__file__).parent / "presets"
+# 默认模板扫描路径：workflows/robot_interaction/ 下的 yaml 文件
+_DEFAULT_TEMPLATES_DIR = Path(__file__).parent.parent
+
+
+def list_templates(templates_dir: Path | str | None = None) -> list[str]:
+    """List available config templates from workflows/robot_interaction/*.yaml.
+
+    Returns file stems (without .yaml) sorted alphabetically.
+    """
+    if templates_dir is None:
+        templates_dir = _DEFAULT_TEMPLATES_DIR
     else:
-        presets_dir = Path(presets_dir)
+        templates_dir = Path(templates_dir)
 
-    if not presets_dir.exists():
+    if not templates_dir.exists():
         return []
 
-    presets = []
-    for file in presets_dir.glob("*.yaml"):
-        presets.append(file.stem)
+    templates = []
+    for file in sorted(templates_dir.glob("*.yaml")):
+        # 跳过 ui/ 自己的 yaml（避免递归列出预设/模板 yaml）
+        if "ui/" in str(file) or "presets/" in str(file):
+            continue
+        templates.append(file.stem)
 
-    return sorted(presets)
+    return templates
+
+
+def load_template(template_name: str, templates_dir: Path | str | None = None) -> UnifiedRobotConfig:
+    """Load a config template by file stem from workflows/robot_interaction/."""
+    if templates_dir is None:
+        templates_dir = _DEFAULT_TEMPLATES_DIR
+    else:
+        templates_dir = Path(templates_dir)
+
+    template_path = templates_dir / f"{template_name}.yaml"
+    return load_yaml(template_path)
+
+
+# 保留旧 API（向后兼容）作为模板的别名
+def list_presets(presets_dir: Path | str | None = None) -> list[str]:
+    """Deprecated: use list_templates(). Kept for backward compat."""
+    return list_templates(presets_dir)
 
 
 def load_preset(preset_name: str, presets_dir: Path | str | None = None) -> UnifiedRobotConfig:
-    """Load a config preset by name"""
-    if presets_dir is None:
-        presets_dir = Path(__file__).parent / "presets"
-    else:
-        presets_dir = Path(presets_dir)
-
-    preset_path = presets_dir / f"{preset_name}.yaml"
-    return load_yaml(preset_path)
+    """Deprecated: use load_template(). Kept for backward compat."""
+    return load_template(preset_name, presets_dir)
