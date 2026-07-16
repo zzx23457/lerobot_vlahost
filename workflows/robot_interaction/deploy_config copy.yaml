@@ -1,0 +1,183 @@
+# Deploy Configuration for MarvainM6Http Robot (HTTP Interface)
+#
+# This config file is for deploying trained policies on the Marvain M6 robot
+# via HTTP API. All robot communication goes through the HTTP server at
+# the specified base URL.
+
+# ============================================================================
+# Policy Configuration
+# ============================================================================
+policy:
+  # Path to pretrained_model directory (relative or absolute)
+  path: outputs/train/smolvla_v2_20260629_112901/checkpoints/160000/pretrained_model
+
+  # Inference device (cuda or cpu)
+  device: cuda
+
+# ============================================================================
+# Dataset Configuration (for non-base strategies and VLA models)
+# ============================================================================
+dataset:
+  # Local dataset root (optional, for reading stats.json and safety bounds)
+  # 支持相对路径（相对于项目根目录）
+  root: /home/zzx23457/lerobot/datasets/26-06-26-20-03-34_v2
+
+  # HuggingFace repo ID (for sentry/highlight/dagger/episodic strategies)
+  # 格式: username/dataset_name 或 datasets/dataset_name
+  repo_id: zzx23457/smolvla_cubes_stack_v1
+
+  # Task description (for VLA/SmolVLA models that require task conditioning)
+  # 描述机器人要执行的任务
+  single_task: "First, pick up the right cube with the right hand and place it on the blue cube in the middle. Then, pick up the left cube with the left hand and place it on the blue cube in the middle."
+
+# ============================================================================
+# Robot Configuration (HTTP Interface)
+# ============================================================================
+robot:
+  # Robot type (must be marvain_m6_http)
+  type: marvain_m6_http
+
+  # Robot instance ID
+  id: marvin_http_001
+
+  # HTTP API base URL
+  http_base_url: http://192.168.15.123:8010
+
+  # HTTP request timeout in seconds
+  timeout: 5.0
+
+  # Joint names (must match policy training configuration)
+  # 16 joints: 7 left arm + 7 right arm + 2 grippers
+  # Note: HTTP API only provides 14 arm joints; grippers are padded with defaults
+  joint_names:
+    - left_arm_joint_1
+    - left_arm_joint_2
+    - left_arm_joint_3
+    - left_arm_joint_4
+    - left_arm_joint_5
+    - left_arm_joint_6
+    - left_arm_joint_7
+    - right_arm_joint_1
+    - right_arm_joint_2
+    - right_arm_joint_3
+    - right_arm_joint_4
+    - right_arm_joint_5
+    - right_arm_joint_6
+    - right_arm_joint_7
+    - left_gripper
+    - right_gripper
+
+  # Camera configurations (for feature declaration; actual images from HTTP)
+  # HTTP server returns a quad_image (1280x960) that MarvainM6HttpRobot crops
+  # into 4 named cameras:
+  #   left_eye    = quad top-left      (0:480,   0:640)
+  #   left_wrist  = quad top-right     (0:480,   640:1280)
+  #   right_wrist = quad bottom-left   (480:960, 0:640)
+  #   right_eye   = quad bottom-right  (480:960, 640:1280)
+  cameras:
+    left_eye:
+      type: http  # HttpCameraConfig — metadata only; frames come from HTTP quad_image
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    right_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    right_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+
+  # Data-driven safety: clip actions to training dataset bounds
+  # Set to dataset path containing meta/stats.json, or null to disable
+  # 使用相对路径（相对于项目根目录）
+  safety_stats_path: datasets/26-06-26-20-03-34_v2  # 启用安全裁剪
+
+  # Safety margin in degrees (added to min/max bounds from stats.json)
+  action_clip_margin_deg: 5.0
+
+  # Maximum per-tick joint motion in degrees (prevents sudden jumps)
+  max_relative_target_deg: 10.0
+
+  # Warn when observations exceed training bounds
+  warn_on_observation_out_of_range: true
+
+  # ---------------------------------------------------------------
+  # rename_map: 把 robot obs 的物理 key (left_eye/right_eye/left_wrist/
+  # right_wrist) 重映射成 policy input slots
+  # ---------------------------------------------------------------
+  # 在这里写**裸 key**（不带 observation.images. 前缀）；deploy.py 转发给
+  # rollout 时会自动加 "observation.images." 前缀以匹配 saved preprocessor
+  # 中 rename_observations_processor 期望的 transition-key 格式。
+  #
+  # 默认值对应当前 SmolVLA 模型（训练时 right_eye/left_wrist/right_wrist
+  # 通过 rename_map 映射成 camera1/2/3）。换模型时改这里即可，deploy.py
+  # 和 .py 都不用动。
+  rename_map:
+    right_eye:   camera1
+    left_wrist:  camera2
+    right_wrist: camera3
+
+# ============================================================================
+# Inference Configuration
+# ============================================================================
+inference:
+  # Inference type: sync (default) or rtc (Real-Time Chunking)
+  # - sync: Execute full action chunk before re-inferring
+  # - rtc: Execute partial chunk and re-infer more frequently
+  type: rtc
+
+  # Control loop frequency in Hz
+  fps: 30.0
+
+  # Runtime duration in seconds (0 = infinite)
+  duration: 0.0
+
+  # Maximum inference iterations
+  max_steps: 10000
+
+  # Inference strategy:
+  # - base: Inference only, no recording (most common)
+  # - sentry: Continuous recording with periodic HF upload
+  # - highlight: Ring buffer, save on keypress
+  # - dagger: Human-in-the-loop correction mode
+  # - episodic: Episode-oriented recording with reset phases
+  strategy: base
+
+  # Action interpolation multiplier (>1 smooths actions between policy outputs)
+  interpolation_multiplier: 1
+
+  # Return to home position after deployment ends
+  return_to_initial_position: true
+
+  # PyTorch compilation (requires PyTorch 2.0+)
+  use_torch_compile: false
+  torch_compile_backend: inductor  # inductor or cudagraphs
+  torch_compile_mode: default      # default, reduce-overhead, or max-autotune
+  compile_warmup_inferences: 2
+
+  # 推理时并行启动 show_cameras.py 打开 OpenCV 预览窗口
+  # 显示模型当前正在使用的相机（从 policy.path/config.json 自动推导）。
+  # 等价于命令行参数 --show-cameras。
+  # 无 DISPLAY/WAYLAND 时子进程会以非零退出码退出，deploy 仍继续。
+  show_cameras: false
+
+  # Real-Time Chunking (RTC) mode parameters (only if type=rtc)
+  rtc:
+    # Number of steps to execute per inference (null = full chunk)
+    execution_horizon: null  # e.g., 10
+
+    # VLA guidance weight (for VLA models only)
+    max_guidance_weight: 10.0

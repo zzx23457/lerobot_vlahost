@@ -1,0 +1,127 @@
+# Deploy Configuration for Marvain M6 Hybrid Robot
+#
+# Hybrid: observations come from the HTTP server (state + quad_image),
+# actions are dispatched directly through the Marvin TCP/IP SDK.
+#
+# Compare to deploy_config.yaml (HTTP-only) and
+# workflows/workflows_sdk/robot_interaction/deploy_config.yaml (SDK-only).
+
+# ============================================================================
+# Policy Configuration
+# ============================================================================
+policy:
+  # Path to pretrained_model directory (relative or absolute)
+  path: outputs/train/act_v2_20260703_105508/checkpoints/020000/pretrained_model
+
+  # Inference device (cuda or cpu)
+  device: cuda
+
+# ============================================================================
+# Dataset Configuration
+# ============================================================================
+dataset:
+  root: datasets/deploy
+  repo_id: datasets/deploy
+  single_task: "manipulation task"
+
+# ============================================================================
+# Robot Configuration (Hybrid: HTTP obs + SDK act)
+# ============================================================================
+robot:
+  type: marvain_m6_hybrid
+
+  id: marvin_hybrid_001
+
+  # --- HTTP backend (used for get_observation) ---
+  http_base_url: http://192.168.10.123:8010
+  timeout: 5.0
+
+  # --- SDK backend (used for send_action) ---
+  # deploy.py maps config['robot']['ip'] → --robot.robot_ip.
+  ip: 192.168.10.190
+  control_mode: impedance         # "position" or "impedance"
+  vel_ratio: 20
+  acc_ratio: 20
+  disable_torque_on_disconnect: false  # false = lock mode (arm holds last pose on disconnect)
+
+  # --- Policy contract (identical to HTTP-only variant) ---
+  joint_names:
+    - left_arm_joint_1
+    - left_arm_joint_2
+    - left_arm_joint_3
+    - left_arm_joint_4
+    - left_arm_joint_5
+    - left_arm_joint_6
+    - left_arm_joint_7
+    - right_arm_joint_1
+    - right_arm_joint_2
+    - right_arm_joint_3
+    - right_arm_joint_4
+    - right_arm_joint_5
+    - right_arm_joint_6
+    - right_arm_joint_7
+    - left_gripper
+    - right_gripper
+
+  cameras:                          # HttpCameraConfig metadata-only stubs
+    right_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    right_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+
+  default_gripper_pos: 0.0
+
+  # Data-driven safety (clip actions to training dataset bounds)
+  safety_stats_path: datasets/26-06-26-10-35-39_v2
+  action_clip_margin_deg: 5.0
+  max_relative_target_deg: 10.0
+  warn_on_observation_out_of_range: true
+
+# ============================================================================
+# Inference Configuration
+# ============================================================================
+inference:
+  type: sync
+  fps: 30.0
+  duration: 0.0
+  max_steps: 10000
+  strategy: base
+  interpolation_multiplier: 1
+
+  # NOTE: with hybrid, return_to_initial uses HTTP-reported joint
+  # values which may differ from SDK-side reality. Disable by default
+  # until you've verified the two backends agree on the starting pose.
+  # (The hybrid robot's disconnect path will still safely release the
+  # arm via SDK; this only controls the smooth-pose-back-to-home step.)
+  return_to_initial_position: false
+
+  use_torch_compile: false
+  torch_compile_backend: inductor
+  torch_compile_mode: default
+  compile_warmup_inferences: 2
+
+  show_cameras: false
+
+  rtc:
+    execution_horizon: null
+    max_guidance_weight: 10.0

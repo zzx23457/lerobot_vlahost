@@ -1,0 +1,172 @@
+# Deploy Configuration for MarvainM6Http Robot (HTTP Interface)
+#
+# This config file is for deploying trained policies on the Marvain M6 robot
+# via HTTP API. All robot communication goes through the HTTP server at
+# the specified base URL.
+
+# ============================================================================
+# Policy Configuration
+# ============================================================================
+policy:
+  # Path to pretrained_model directory (relative or absolute)
+  path: /home/zzx23457/lerobot_files/outputs/train/act_v2_20260701_181934/checkpoints/200000/pretrained_model
+
+  # Inference device (cuda or cpu)
+  device: cuda
+
+# ============================================================================
+# Dataset Configuration (for non-base strategies and VLA models)
+# ============================================================================
+dataset:
+  # Local dataset root (optional, for reading stats.json and safety bounds)
+  # 支持相对路径（相对于项目根目录）
+  root: datasets/deploy
+
+  # HuggingFace repo ID (for sentry/highlight/dagger/episodic strategies)
+  # 格式: username/dataset_name 或 datasets/dataset_name
+  repo_id: datasets/deploy
+
+  # Task description (for VLA/SmolVLA models that require task conditioning)
+  # 描述机器人要执行的任务
+  single_task: "manipulation task"
+
+# ============================================================================
+# Robot Configuration (HTTP Interface)
+# ============================================================================
+robot:
+  # Robot type (must be marvain_m6_http)
+  type: marvain_m6_http
+
+  # Robot instance ID
+  id: marvin_http_001
+
+  # HTTP API base URL
+  http_base_url: http://192.168.10.123:8010
+
+  # HTTP request timeout in seconds
+  timeout: 5.0
+
+  # Joint names (must match policy training configuration)
+  # 16 joints: 7 left arm + 7 right arm + 2 grippers
+  # Note: HTTP API only provides 14 arm joints; grippers are padded with defaults
+  joint_names:
+    - left_arm_joint_1
+    - left_arm_joint_2
+    - left_arm_joint_3
+    - left_arm_joint_4
+    - left_arm_joint_5
+    - left_arm_joint_6
+    - left_arm_joint_7
+    - right_arm_joint_1
+    - right_arm_joint_2
+    - right_arm_joint_3
+    - right_arm_joint_4
+    - right_arm_joint_5
+    - right_arm_joint_6
+    - right_arm_joint_7
+    - left_gripper
+    - right_gripper
+
+  # Camera configurations (for feature declaration; actual images from HTTP)
+  # Note: Images come from the HTTP server as a quad_image (1280x640) that is
+  # automatically split into individual cameras. These configs define the expected
+  # dimensions for each camera after splitting.
+  cameras:
+    right_eye:
+      type: http  # HttpCameraConfig — metadata only, frames come from the robot's HTTP response
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    right_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+
+  # Data-driven safety: clip actions to training dataset bounds
+  # Set to dataset path containing meta/stats.json, or null to disable
+  # # 使用相对路径（相对于项目根目录）
+  # safety_stats_path: datasets/26-06-26-10-35-39_v2  # 启用安全裁剪
+
+  # # Safety margin in degrees (added to min/max bounds from stats.json)
+  # action_clip_margin_deg: 5.0
+
+  # # Maximum per-tick joint motion in degrees (prevents sudden jumps)
+  # max_relative_target_deg: 10.0
+
+  # Warn when observations exceed training bounds
+  warn_on_observation_out_of_range: true
+
+# ============================================================================
+# Inference Configuration
+# ============================================================================
+inference:
+  # Inference type: sync | rtc | chunk
+  # - sync:  one inference per control tick (send one action at a time)
+  # - rtc:   Real-Time Chunking, async partial-chunk execution
+  # - chunk: open-loop — one inference every chunk_interval_s, dispatch the
+  #          first n_action_steps actions in a SINGLE HTTP send (send_action_chunk)
+  type: chunk
+
+  # chunk mode parameters (only used when type=chunk)
+  # Number of actions from each chunk to dispatch open-loop in one send.
+  n_action_steps: 20
+  # Seconds to wait between successive chunk sends (open-loop hold time).
+  chunk_interval_s: 2.0
+
+  # Control loop frequency in Hz
+  fps: 30.0
+
+  # Runtime duration in seconds (0 = infinite)
+  duration: 0.0
+
+  # Maximum inference iterations
+  max_steps: 10000
+
+  # Inference strategy:
+  # - base: Inference only, no recording (most common)
+  # - sentry: Continuous recording with periodic HF upload
+  # - highlight: Ring buffer, save on keypress
+  # - dagger: Human-in-the-loop correction mode
+  # - episodic: Episode-oriented recording with reset phases
+  strategy: base
+
+  # Action interpolation multiplier (chunk mode ignores this; keep 1)
+  interpolation_multiplier: 1
+
+  # Return to home position after deployment ends
+  return_to_initial_position: true
+
+  # PyTorch compilation (requires PyTorch 2.0+)
+  use_torch_compile: false
+  torch_compile_backend: inductor  # inductor or cudagraphs
+  torch_compile_mode: default      # default, reduce-overhead, or max-autotune
+  compile_warmup_inferences: 2
+
+  # 推理时并行启动 show_cameras.py 打开 OpenCV 预览窗口
+  # 显示模型当前正在使用的相机（从 policy.path/config.json 自动推导）。
+  # 等价于命令行参数 --show-cameras。
+  # 无 DISPLAY/WAYLAND 时子进程会以非零退出码退出，deploy 仍继续。
+  show_cameras: true
+
+  # Real-Time Chunking (RTC) mode parameters (only if type=rtc)
+  rtc:
+    # Number of steps to execute per inference (null = full chunk)
+    execution_horizon: 30  # e.g., 10
+
+    # VLA guidance weight (for VLA models only)
+    max_guidance_weight: 10.0

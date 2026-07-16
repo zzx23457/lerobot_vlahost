@@ -1,0 +1,81 @@
+mode: deploy
+robot:
+  http_base_url: http://192.168.10.123:8010
+  robot_id: marvain_m6_01
+  type: marvain_m6_http
+  timeout: 5.0
+  cameras:
+    right_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_eye:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    left_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+    right_wrist:
+      type: http
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: rgb
+  safety_stats_path: null
+  action_clip_margin_deg: 5.0
+  max_relative_target_deg: 10.0
+  joint_names:
+    - left_arm_joint1
+    - left_arm_joint2
+    - left_arm_joint3
+    - left_arm_joint4
+    - left_arm_joint5
+    - left_arm_joint6
+    - left_arm_joint7
+    - right_arm_joint1
+    - right_arm_joint2
+    - right_arm_joint3
+    - right_arm_joint4
+    - right_arm_joint5
+    - right_arm_joint6
+    - right_arm_joint7
+    - left_gripper
+    - right_gripper
+runtime:
+  return_to_initial_position: true
+  play_sounds: true
+policy:
+  path: outputs/train/smolvla/pretrained_model
+  device: cuda
+inference:
+  type: sync
+  strategy: base
+  fps: 30.0
+  duration: 0.0
+  max_steps: 10000
+  interpolation_multiplier: 1
+  use_torch_compile: false
+  torch_compile_backend: inductor
+  torch_compile_mode: default
+  compile_warmup_inferences: 2
+  show_cameras: false
+  rtc:
+    execution_horizon: null
+    max_guidance_weight: 10.0
+  rename_map:
+    camera1: image
+    camera2: wrist_image
+dataset:
+  repo_id: username/my_dataset
+  root: datasets/
+  episode: null
+  single_task: pick up the object and place it in the target location
+  fps: 30.0
