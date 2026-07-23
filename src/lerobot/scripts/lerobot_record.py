@@ -335,9 +335,10 @@ def record_loop(
 
         sleep_time_s: float = control_interval - dt_s
         if sleep_time_s < 0:
-            logging.warning(
-                f"Record loop is running slower ({1 / dt_s:.1f} Hz) than the target FPS ({fps} Hz). Dataset frames might be dropped and robot control might be unstable. Common causes are: 1) Camera FPS not keeping up 2) Policy inference taking too long 3) CPU starvation"
-            )
+            pass
+            # logging.warning(
+            #     f"Record loop is running slower ({1 / dt_s:.1f} Hz) than the target FPS ({fps} Hz). Dataset frames might be dropped and robot control might be unstable. Common causes are: 1) Camera FPS not keeping up 2) Policy inference taking too long 3) CPU starvation"
+            # )
 
         precise_sleep(max(sleep_time_s, 0.0))
 

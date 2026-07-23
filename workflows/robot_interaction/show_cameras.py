@@ -216,8 +216,13 @@ def main() -> int:
     if not http_url:
         print("❌ --http-base-url 或配置文件里的 robot.http_base_url 是必填项")
         return 2
-    if not policy_path_str:
-        print("❌ --policy-path 或配置文件里的 policy.path 是必填项")
+    # policy.path 仅在推导相机列表时需要；如果用户已经显式给出 --cameras，
+    # 则 policy.path 退化为可选（仅用于诊断打印）。
+    if not policy_path_str and not args.cameras:
+        print(
+            "❌ --policy-path 或配置文件里的 policy.path 是必填项\n"
+            "   （除非用 --cameras 显式指定相机名）"
+        )
         return 2
 
     policy_path = resolve_path(policy_path_str)

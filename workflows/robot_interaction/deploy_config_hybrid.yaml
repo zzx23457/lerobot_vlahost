@@ -18,8 +18,7 @@ mode: deploy
 # ============================================================================
 policy:
   # Path to pretrained_model directory (relative or absolute)
-  path: outputs/train/act_v2_20260703_105508/checkpoints/020000/pretrained_model
-
+  path: /home/zzx23457/lerobot_files/outputs/train/act_26-07-21-14-14-22_v2_20260722_092300/checkpoints/140000/pretrained_model
   # Inference device (cuda or cpu)
   device: cuda
 
@@ -47,8 +46,8 @@ robot:
   # deploy.py maps config['robot']['ip'] → --robot.robot_ip.
   ip: 192.168.10.190
   control_mode: impedance         # "position" or "impedance"
-  vel_ratio: 20
-  acc_ratio: 20
+  vel_ratio: 100
+  acc_ratio: 100
   disable_torque_on_disconnect: false  # false = lock mode (arm holds last pose on disconnect)
 
   # --- Policy contract (identical to HTTP-only variant) ---
@@ -120,7 +119,7 @@ inference:
   # until you've verified the two backends agree on the starting pose.
   # (The hybrid robot's disconnect path will still safely release the
   # arm via SDK; this only controls the smooth-pose-back-to-home step.)
-  return_to_initial_position: false
+  return_to_initial_position: true
 
   use_torch_compile: false
   torch_compile_backend: inductor

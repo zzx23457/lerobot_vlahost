@@ -19,6 +19,7 @@
 import base64
 import json
 import logging
+import time
 from functools import cached_property
 from pathlib import Path
 
@@ -487,6 +488,10 @@ class MarvainM6HttpRobot(Robot):
                 except Exception as e:
                     logger.warning(f"{self} failed to decode/split quad_image: {e}")
 
+            # Pass through need_new_chunk field if present (for chunk-based inference)
+            if "need_new_chunk" in data:
+                obs["need_new_chunk"] = data["need_new_chunk"]
+
             return obs
 
         except requests.RequestException as e:
@@ -692,6 +697,52 @@ class MarvainM6HttpRobot(Robot):
             )
 
         return clamped_joints
+
+    # ------------------------------------------------------------------
+    # Go Home
+    # ------------------------------------------------------------------
+    @check_if_not_connected
+    def go_home(self, wait_before: float = 1.0) -> bool:
+        """Call the vlahost server's /go_home endpoint to return robot to home position.
+
+        This uses the server's ROS 2 service call rather than sending joint commands,
+        which is more reliable and handles the motion planning server-side.
+
+        Args:
+            wait_before: Seconds to wait before sending the go_home command, allowing
+                the robot to stabilize after any previous motion. Default is 1.0 seconds.
+
+        Returns:
+            bool: True if the go_home command succeeded, False otherwise.
+        """
+        # Wait for robot to stabilize before sending go_home command
+        if wait_before > 0:
+            logger.info(f"{self} waiting {wait_before:.1f}s before go_home...")
+            time.sleep(wait_before)
+
+        url = f"{self.config.http_base_url}/go_home"
+        try:
+            response = self._session.post(url, timeout=self.config.timeout)
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get("success"):
+                logger.info(f"{self} go_home succeeded: {result.get('message', '')}")
+                return True
+            else:
+                logger.error(f"{self} go_home failed: {result.get('error', 'unknown error')}")
+                return False
+
+        except requests.RequestException as e:
+            error_msg = f"Failed to call go_home at {url}: {e}"
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg += f"\nServer response: {error_detail}"
+                except Exception:
+                    error_msg += f"\nServer response: {e.response.text[:200]}"
+            logger.error(error_msg)
+            return False
 
     # ------------------------------------------------------------------
     # Disconnect

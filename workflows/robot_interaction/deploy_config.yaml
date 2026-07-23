@@ -16,7 +16,8 @@ mode: deploy
 # ============================================================================
 policy:
   # Path to pretrained_model directory (relative or absolute)
-  path: /home/zzx23457/lerobot_files/outputs/train/act_v2_20260701_181934/checkpoints/200000/pretrained_model
+  # path: /home/zzx23457/lerobot_files/outputs/train/act_26-07-10-13-42-43v2_20260716_163013/checkpoints/070000/pretrained_model
+  path: /home/zzx23457/lerobot_files/outputs/train/act_26-07-21-14-14-22_v2_20260722_092300/checkpoints/140000/pretrained_model
 
   # Inference device (cuda or cpu)
   device: cuda

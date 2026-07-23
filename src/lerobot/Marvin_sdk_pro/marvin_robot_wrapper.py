@@ -206,7 +206,7 @@ class MarvinRobotWrapper:
 
         # 默认阻抗参数（柔顺）
         if K is None:
-            K = [2.0, 2.0, 2.0, 1.6, 0.5, 1.0, 1.0]
+            K = [5.0, 5.0, 5.0, 5.0, 3.0, 3.0, 3.0]
         if D is None:
             D = [0.6, 0.6, 0.6, 0.4, 0.2, 0.2, 0.2]
 
@@ -214,8 +214,8 @@ class MarvinRobotWrapper:
         # kineParams: [x, y, z, rx, ry, rz] 工具相对末端法兰的偏移（mm）和姿态（度）
         # dynamicParams: [m, mx, my, mz, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
         kine_params = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 无偏移
-        left_dyn_params = [5, 0.0, 0.0, 50.0, 0.004, 0.0, 0.0, 0.004, 0.0, 0.03]
-        right_dyn_params = [5, 0.0, 0.0, 50.0, 0.004, 0.0, 0.0, 0.004, 0.0, 0.03]
+        left_dyn_params = [0.6, 0.0, 0.0, 50.0, 0.004, 0.0, 0.0, 0.004, 0.0, 0.03]
+        right_dyn_params = [0.6, 0.0, 0.0, 50.0, 0.004, 0.0, 0.0, 0.004, 0.0, 0.03]
 
         # 对A臂和B臂都设置阻抗模式
         for arm in ['A', 'B']:

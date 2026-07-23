@@ -116,7 +116,7 @@ class ACTPolicy(PreTrainedPolicy):
         # querying the policy.
         if len(self._action_queue) == 0:
             actions = self.predict_action_chunk(batch)[:, : self.config.n_action_steps]
-
+            
             # `self.model.forward` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._action_queue.extend(actions.transpose(0, 1))
@@ -142,13 +142,39 @@ class ACTPolicy(PreTrainedPolicy):
 
         actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
+        # Compute per-element L1 error: [batch_size, chunk_size, action_dim]
         abs_err = F.l1_loss(batch[ACTION], actions_hat, reduction="none")
         valid_mask = ~batch["action_is_pad"].unsqueeze(-1)
-        num_valid = valid_mask.sum() * abs_err.shape[-1]
-        l1_loss = (abs_err * valid_mask).sum() / num_valid.clamp_min(1)
 
-        loss_dict = {"l1_loss": l1_loss.item()}
-        if self.config.use_vae and log_sigma_x2_hat is not None:
+        # Apply time-weighted loss to reduce inter-chunk jitter
+        if self.config.loss_time_decay > 0 or self.config.loss_front_weight != 1.0:
+            chunk_size = abs_err.shape[1]
+            device = abs_err.device
+
+            # Exponential decay: w[t] = exp(-lambda * t)
+            time_weights = torch.exp(-self.config.loss_time_decay * torch.arange(chunk_size, device=device))
+
+            # Additional weight for the first frame to enforce continuity with current state
+            time_weights[0] *= self.config.loss_front_weight
+
+            # Normalize to maintain loss magnitude (important for KL loss balance)
+            time_weights = time_weights / time_weights.mean()
+
+            # Apply weights: [1, chunk_size, 1] broadcasts with [batch_size, chunk_size, action_dim]
+            weighted_err = abs_err * time_weights.unsqueeze(0).unsqueeze(-1) * valid_mask
+        else:
+            # No time weighting (original behavior)
+            weighted_err = abs_err * valid_mask
+
+        num_valid = valid_mask.sum() * abs_err.shape[-1]
+        l1_loss = weighted_err.sum() / num_valid.clamp_min(1)
+
+        loss_dict = {
+            "l1_loss": l1_loss.item(),
+            "frame0_err": abs_err[:, 0, :].mean().item(),  # Monitor first frame error
+        }
+
+        if self.config.use_vae:
             # Calculate Dₖₗ(latent_pdf || standard_normal). Note: After computing the KL-divergence for
             # each dimension independently, we sum over the latent dimension to get the total
             # KL-divergence per batch element, then take the mean over the batch.

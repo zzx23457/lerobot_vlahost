@@ -36,7 +36,9 @@ class CameraConfig:
 class RobotConfig:
     """Robot hardware configuration (all modes)"""
     http_base_url: str = "http://192.168.10.123:8010"
-    robot_id: str = "marvain_m6_01"
+    # Field name MUST be `id` to match deploy.py / replay.py / show_cameras.py contract
+    # (they read config['robot']['id']). Renaming from `robot_id` fixes a KeyError.
+    id: str = "marvain_m6_01"
     type: str = "marvain_m6_http"
     timeout: float = 5.0
     cameras: dict[str, CameraConfig] = field(default_factory=lambda: {
@@ -279,9 +281,13 @@ def save_yaml(config: UnifiedRobotConfig, filepath: Path | str) -> None:
         config_dict["return_to_initial_position"] = config.runtime.return_to_initial_position
 
     elif config.mode == "camera_preview":
-        # show_cameras.py reads http_base_url from yaml.robot and policy.path
-        if config.policy and config.policy.path:
-            config_dict["policy"] = {"path": config.policy.path}
+        # show_cameras.py reads http_base_url from yaml.robot and policy.path.
+        # Always emit the policy block (even with empty path) to keep the schema
+        # consistent; show_cameras.py will still validate and error if path is "".
+        config_dict["policy"] = {
+            "path": config.policy.path if config.policy else "",
+            "device": config.policy.device if config.policy else "cuda",
+        }
 
     with open(filepath, "w") as f:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False, indent=2)

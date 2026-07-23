@@ -1,13 +1,13 @@
 {
   "_comment": "List of dataset folder names (without 'lerobot_datasets-' prefix) to convert from v1 \u2192 v2. v2 output is named '<v1_name><v2_suffix>'. All paths are resolved relative to <REPO_ROOT>/datasets/<name>. Optional 'cameras' is a length-4 array of 0/1, ordered [left_eye, right_eye, left_wrist, right_wrist]; 0 = drop that camera from the v2 output (videos/, meta/info.json features entry, meta/stats.json top-level key, and the 4 videos/<cam>/* columns in meta/episodes/chunk-000/*.parquet). Missing 'cameras' key = all cameras enabled (backward compatible).",
-  "v2_suffix": "_0101_v2",
+  "v2_suffix": "_0111_v2",
   "cameras": [
     0,
     1,
-    0,
+    1,
     1
   ],
   "datasets": [
-    "26-07-09-19-48-51"
+    "26-07-01-14-37-04"
   ]
 }

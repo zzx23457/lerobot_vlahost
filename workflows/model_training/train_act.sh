@@ -14,20 +14,20 @@ set -euo pipefail
 
 # ============== 配置 ==============
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DATASET_ROOT="${DATASET_ROOT:-$PROJECT_ROOT/datasets/26-07-09-19-48-51_0101_v2}"
+DATASET_ROOT="${DATASET_ROOT:-$PROJECT_ROOT/datasets/26-07-01-14-37-04_0111_v2}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_ROOT/outputs/train}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
-BATCH_SIZE="${BATCH_SIZE:-4}"
+BATCH_SIZE="${BATCH_SIZE:-2}"
 STEPS="${STEPS:-100000}"
 EVAL_FREQ="${EVAL_FREQ:-10000}"
 SAVE_FREQ="${SAVE_FREQ:-10000}"
 LOG_FREQ="${LOG_FREQ:-50}"
 
-WANDB_PROJECT="${WANDB_PROJECT:-20260711408}"
+WANDB_PROJECT="${WANDB_PROJECT:-202607172057}"
 # 默认关 wandb —— 它是可选依赖,不装也能训
 # 想用 wandb 时: pip install wandb && WANDB_ENABLE=true ./train_act.sh train
-WANDB_ENABLE="${WANDB_ENABLE:-true}"
+WANDB_ENABLE="${WANDB_ENABLE:-false}"
 PUSH_TO_HUB="${PUSH_TO_HUB:-false}"
 
 # 颜色
@@ -426,7 +426,7 @@ phase3_train() {
         --job_name="act_${tag}"
         --batch_size="$BATCH_SIZE"
         --steps="$STEPS"
-        --eval_freq="$EVAL_FREQ"
+        --env_eval_freq="$EVAL_FREQ"
         --save_freq="$SAVE_FREQ"
         --log_freq="$LOG_FREQ"
         --policy.device=cuda

@@ -122,6 +122,10 @@ class ACTConfig(PreTrainedConfig):
     dropout: float = 0.1
     kl_weight: float = 10.0
 
+    # Time-weighted loss for reducing inter-chunk jitter
+    loss_time_decay: float = 0.0  # （默认 0 表示不启用）Exponential decay rate for temporal loss weighting (0 = no weighting)
+    loss_front_weight: float = 1.0  # （默认 1.0 表示无额外权重）Additional weight multiplier for the first frame (frame 0)
+
     # Training preset
     optimizer_lr: float = 1e-5
     optimizer_weight_decay: float = 1e-4

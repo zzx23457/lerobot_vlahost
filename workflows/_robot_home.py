@@ -115,20 +115,37 @@ def return_to_home_and_disable(config: dict, returncode: int) -> None:
         print(f"   ⚠️  连机器人失败，跳过 return-to-home: {type(e).__name__}: {e}")
         return
 
-    # 3. 组装 home action（按 joint_names 顺序）--------------------
-    home_action: dict[str, float] = {}
-    for i, name in enumerate(joint_names):
-        home_action[f"{name}.pos"] = float(home_action_deg[i])
-
-    # 4. 连续发送 home action 约 2 秒 ------------------------------
+    # 3. 尝试使用新 go_home() 方法（如果支持）--------------------
+    # 优先使用 go_home() ROS 服务调用（可靠、快速），如果失败
+    # 则回退到旧方法（连续发送关节位置动作）。
     try:
-        dt = 1.0 / _RETURN_HOME_HZ
-        for _ in range(_RETURN_HOME_ITERATIONS):
-            robot.send_action(home_action)
-            time.sleep(dt)
-        print(f"   ✓ 已发送 {_RETURN_HOME_ITERATIONS} 次 home action")
+        go_home_success = False
+        if hasattr(robot, "go_home"):
+            try:
+                print("   🚀 使用 POST /go_home ROS 服务...")
+                go_home_success = robot.go_home()
+                if go_home_success:
+                    print("   ✓ go_home() 调用成功")
+                else:
+                    print("   ⚠️  go_home() 返回失败，回退到发送动作模式")
+            except Exception as e:
+                print(f"   ⚠️  go_home() 调用异常，回退到发送动作模式: {type(e).__name__}: {e}")
+
+        # 4. 回退方案：连续发送 home action 约 2 秒 --------------------
+        if not go_home_success:
+            # 组装 home action（按 joint_names 顺序）
+            home_action: dict[str, float] = {}
+            for i, name in enumerate(joint_names):
+                home_action[f"{name}.pos"] = float(home_action_deg[i])
+
+            print(f"   📤 回退模式：连续发送 home action ({_RETURN_HOME_ITERATIONS} 次)")
+            dt = 1.0 / _RETURN_HOME_HZ
+            for _ in range(_RETURN_HOME_ITERATIONS):
+                robot.send_action(home_action)
+                time.sleep(dt)
+            print(f"   ✓ 已发送 {_RETURN_HOME_ITERATIONS} 次 home action")
     except Exception as e:
-        print(f"   ⚠️  发送 home action 失败: {type(e).__name__}: {e}")
+        print(f"   ⚠️  执行 home 操作失败: {type(e).__name__}: {e}")
     finally:
         # 5. 断连
         try:

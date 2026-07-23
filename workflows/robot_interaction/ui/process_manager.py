@@ -88,6 +88,11 @@ class ProcessManager:
         tmp = dump_to_tempfile(config)
         args = ["--config", str(tmp)]
 
+        # 只有用户填了 policy.path 才传 --policy-path；
+        # 纯相机预览（用户已勾选 camera_list）不需要策略模型。
+        if config.policy and config.policy.path:
+            args.extend(["--policy-path", config.policy.path])
+
         # show_cameras.py 仍通过 CLI 接 camera_list / camera_fps /
         # show_quad / window_size（其 yaml schema 没暴露这 4 个）。
         if config.runtime.camera_list:

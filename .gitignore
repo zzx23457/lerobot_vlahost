@@ -164,6 +164,7 @@ wandb/
 
 # Data folders
 data/
+datasets/
 outputs/
 
 # Translations

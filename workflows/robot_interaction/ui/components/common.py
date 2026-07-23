@@ -71,9 +71,13 @@ def create_strategy_dropdown(value: str = "base", **kwargs):
 def create_inference_type_selector(value: str = "sync", **kwargs):
     """Create inference type radio selector"""
     return gr.Radio(
-        choices=["sync", "rtc"],
+        choices=["sync", "rtc", "chunk"],
         value=value,
         label="Inference Type",
-        info="sync: full chunk execution | rtc: Real-Time Chunking for faster response",
+        info=(
+            "sync: full chunk execution | "
+            "rtc: Real-Time Chunking for faster response | "
+            "chunk: open-loop (infer every chunk_interval_s, send n_action_steps)"
+        ),
         **kwargs
     )

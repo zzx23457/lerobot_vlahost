@@ -130,7 +130,41 @@ class ChunkInferenceEngine(InferenceEngine):
         if obs_frame is None:
             return None
 
-        # Throttle to one chunk every chunk_interval_s.
+        # Check if this is the very first inference (no chunk sent yet)
+        is_first_chunk = self._last_chunk_t is None
+
+        # Check if server requests a new chunk via the 'need_new_chunk' flag.
+        # Special case: if this is the first chunk, always infer regardless of need_new_chunk value
+        # to ensure the robot starts moving immediately.
+        need_new_chunk = obs_frame.get("need_new_chunk")
+        # print(f"need_new_chunk: {need_new_chunk}")
+        if need_new_chunk is not None:
+            # Event-driven mode: server explicitly signals when it needs a new chunk
+            if need_new_chunk == 0 and not is_first_chunk:
+                # Server is still executing the previous chunk, do not infer
+                # (but allow first chunk to go through regardless)
+                return None
+            elif need_new_chunk == 1 or is_first_chunk:
+                if is_first_chunk:
+                    print(f"🟢 First chunk: inferring regardless of need_new_chunk={need_new_chunk}")
+                else:
+                    print(f"Inferring new chunk...")
+                # Server requests a new chunk, or this is the first chunk - infer immediately
+
+                chunk = self._infer_chunk(obs_frame)
+                if chunk is None or chunk.numel() == 0:
+                    return None
+                self._last_chunk_t = time.perf_counter()
+                return chunk
+            else:
+                logger.warning(
+                    "Unexpected need_new_chunk value: %s (expected 0 or 1), falling back to time-based throttling",
+                    need_new_chunk
+                )
+
+        # Fall back to time-based throttling when need_new_chunk is absent.
+        # This maintains backward compatibility with servers that don't send the flag,
+        # and also handles the very first inference (before the server can signal readiness).
         now = time.perf_counter()
         if (
             self._last_chunk_t is not None
@@ -138,7 +172,7 @@ class ChunkInferenceEngine(InferenceEngine):
             and now - self._last_chunk_t < self._chunk_interval_s
         ):
             return None
-
+        print("Using chunk_interval_s")
         chunk = self._infer_chunk(obs_frame)
         if chunk is None or chunk.numel() == 0:
             return None
@@ -155,6 +189,9 @@ class ChunkInferenceEngine(InferenceEngine):
         # Shallow copy is intentional: the caller builds ``obs_frame`` fresh per
         # tick, so the tensor/array values are not shared with any other reader.
         observation = copy(obs_frame)
+        # Remove metadata fields that should not be passed to the inference pipeline
+        observation.pop("need_new_chunk", None)
+
         autocast_ctx = (
             torch.autocast(device_type=self._device.type)
             if self._device.type == "cuda" and self._policy.config.use_amp

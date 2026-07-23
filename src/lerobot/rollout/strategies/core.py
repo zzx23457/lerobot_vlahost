@@ -15,11 +15,14 @@
 """Rollout strategy ABC and shared action-dispatch helper."""
 
 from __future__ import annotations
+from pathlib import Path
 
 import abc
 import logging
 import time
 from typing import TYPE_CHECKING
+
+import torch
 
 from lerobot.datasets.utils import DEFAULT_VIDEO_FILE_SIZE_IN_MB
 from lerobot.utils.action_interpolator import ActionInterpolator
@@ -36,6 +39,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+if_continue: bool = False
+reject_count: int = 0  # 连续拒绝计数器
+is_first_chunk: bool = True  # 标记是否是第一次发送chunk
 
 class RolloutStrategy(abc.ABC):
     """Abstract base for rollout execution strategies.
@@ -51,6 +57,7 @@ class RolloutStrategy(abc.ABC):
         self._interpolator: ActionInterpolator | None = None
         self._warmup_flushed: bool = False
         self._cached_obs_processed: dict | None = None
+        
 
     def _init_engine(self, ctx: RolloutContext) -> None:
         """Attach the inference engine and action interpolator, then start the backend.
@@ -142,6 +149,20 @@ class RolloutStrategy(abc.ABC):
         """Smoothly interpolate the robot back to its initial position."""
         robot = hw.robot_wrapper
         target = hw.initial_position
+
+        # Try using go_home() method if available (more reliable for HTTP robots)
+        if hasattr(robot.inner, "go_home"):
+            try:
+                logger.info("Using robot's go_home() method...")
+                if robot.inner.go_home():
+                    logger.info("go_home() succeeded")
+                    return
+                else:
+                    logger.warning("go_home() returned False, falling back to interpolation")
+            except Exception as e:
+                logger.warning("go_home() failed: %s, falling back to interpolation", e)
+
+        # Fallback: smooth interpolation from current position to target
         try:
             current_obs = robot.get_observation()
             current_pos = {k: v for k, v in current_obs.items() if k in target}
@@ -289,7 +310,7 @@ def send_next_action(
     if interpolator.needs_new_action():
         obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
         action_tensor = engine.get_action(obs_frame)
-        print("action_tensor shape:", action_tensor.shape)
+        # print("action_tensor shape:", action_tensor.shape)
         if action_tensor is not None:
             interpolator.add(action_tensor.cpu())
 
@@ -303,7 +324,7 @@ def send_next_action(
     processed = ctx.processors.robot_action_processor((action_dict, obs_raw))
     ctx.hardware.robot_wrapper.send_action(processed)
     # print(f"---------------- action size:",
-    print("action_dict 键数量:", len(action_dict))
+    # print("action_dict 键数量:", len(action_dict))
     return action_dict
 
 
@@ -323,19 +344,207 @@ def send_next_action_chunk(
     Returns the last action dict in the chunk (for telemetry), or ``None`` when
     no chunk was ready (e.g. the engine is still within its interval).
     """
+    global if_continue, reject_count
     engine = ctx.policy.inference
     features = ctx.data.dataset_features
     ordered_keys = ctx.data.ordered_action_keys
 
     obs_frame = build_dataset_frame(features, obs_processed, prefix=OBS_STR)
+
+    # Pass through need_new_chunk if present in raw observation (先传递原始值)
+    if "need_new_chunk" in obs_raw:
+        obs_frame["need_new_chunk"] = obs_raw["need_new_chunk"]
+
+    # 如果 if_continue 为 True，强制覆盖为 1（优先级更高）
+    if if_continue:
+        if_continue = False
+        obs_frame["need_new_chunk"] = 1
+        print("⚠️ if_continue=True, forcing need_new_chunk=1 to request new chunk")
+
     chunk = engine.get_action_chunk(obs_frame)
+
+    if engine.failed:
+        return None
     if chunk is None or len(chunk) == 0:
         return None
+
+    # 检查 chunk 的第一帧与输入的 obs_frame 的机械臂 14 个关节角度
+    if chunk.shape[1] == len(ordered_keys):
+        # 提取 obs_frame 中的 14 个关节位置（排除 gripper）
+        arm_joint_keys = [k for k in ordered_keys if 'gripper' not in k.lower()][:14]
+
+        # 从 obs_raw 中获取当前关节位置
+        current_positions = []
+        for joint_key in arm_joint_keys:
+            obs_key = f"{joint_key}.pos"  # 转换为 observation 格式
+            if obs_key in obs_raw:
+                current_positions.append(obs_raw[obs_key])
+            else:
+                # 如果找不到，尝试直接用 joint_key
+                if joint_key in obs_raw:
+                    current_positions.append(obs_raw[joint_key])
+                else:
+                    print(f"⚠️ Warning: joint {joint_key} not found in obs_raw")
+                    current_positions.append(0.0)  # 默认值
+
+        # 提取 chunk 第一帧的 14 个关节目标位置
+        first_action = chunk[0][:14]  # 假设前 14 个是关节，后 2 个是 gripper
+
+        # 计算每个关节的位置差距（模型输出已经是角度，直接比较角度值）
+        max_diff = 0.0
+        max_diff_joint = None
+        threshold_deg = 1.0  # 5 度阈值
+
+        for i, (current, target) in enumerate(zip(current_positions, first_action)):
+            diff = abs(float(target) - float(current))
+            if diff > max_diff:
+                max_diff = diff
+                max_diff_joint = arm_joint_keys[i] if i < len(arm_joint_keys) else f"joint_{i}"
+
+        # 第一次发送chunk，直接执行降级方案（无条件）
+        global is_first_chunk
+        if is_first_chunk:
+            print("🟦 第一次发送chunk，启用线性插值降级方案（无条件）")
+            is_first_chunk = False  # 标记已经不是第一次了
+
+            chunk_size = chunk.shape[0]
+            K = 10  # 插值位置参数：前K帧用插值替换
+
+            # 保存原始 chunk 的副本
+            original_chunk = chunk.clone()
+
+            # 对所有14个关节执行插值（第一次无条件执行）
+            for i, joint_key in enumerate(arm_joint_keys[:16]):
+                current_val = current_positions[i]
+
+                if chunk_size > K:
+                    # 目标：原 chunk 的第 K 帧（索引 K-1）
+                    target_val_at_K = float(original_chunk[K-1, i])
+
+                    print(f"   → 关节 {joint_key}: 当前={current_val:.2f}°, chunk第{K}帧={target_val_at_K:.2f}°")
+
+                    # 前K帧：从 current_val 插值到原 chunk 第K帧
+                    linear_trajectory = torch.linspace(current_val, target_val_at_K, K,
+                                                      dtype=chunk.dtype, device=chunk.device)
+                    chunk[:K, i] = linear_trajectory
+
+                    print(f"      前{K}帧插值到第{K}帧，后{chunk_size-K}帧保持原chunk不变")
+                else:
+                    # chunk 总长度 <= K，全部插值到最后一帧
+                    target_val = float(original_chunk[-1, i])
+                    linear_trajectory = torch.linspace(current_val, target_val, chunk_size,
+                                                      dtype=chunk.dtype, device=chunk.device)
+                    chunk[:, i] = linear_trajectory
+                    print(f"      整个chunk({chunk_size}帧)全部插值")
+
+            print(f"✓ 完成第一次chunk降级处理，继续发送")
+
+        # 非第一次：检查阈值
+        elif max_diff > threshold_deg:
+            reject_count += 1
+            print(f"⚠️ Chunk rejected ({reject_count}/2): max joint diff = {max_diff:.4f}° at {max_diff_joint}")
+            print(f"   Threshold = {threshold_deg:.1f}°")
+
+            # 连续拒绝 2 次，使用线性插值降级方案
+            if reject_count >= 2:
+                print("🔴 连续拒绝 2 次，启用线性插值降级方案")
+                reject_count = 0  # 重置计数器
+
+                chunk_size = chunk.shape[0]
+                K = 40  # 插值位置参数：前K帧用插值替换
+
+                # 保存原始 chunk 的副本
+                original_chunk = chunk.clone()
+
+                # 逐个检查前 14 个关节，只对超出阈值的关节进行插值替换
+                for i, joint_key in enumerate(arm_joint_keys[:14]):
+                    current_val = current_positions[i]
+                    diff = abs(float(first_action[i]) - float(current_val))
+
+                    if diff > threshold_deg:
+                        # 该关节超出阈值，使用新的插值策略
+                        if chunk_size > K:
+                            # 目标：原 chunk 的第 K 帧（索引 K-1）
+                            target_val_at_K = float(original_chunk[K-1, i])
+
+                            print(f"   → 关节 {joint_key}: 当前={current_val:.2f}°, chunk第{K}帧={target_val_at_K:.2f}°, 差距={diff:.2f}°")
+
+                            # 前K帧：从 current_val 插值到原 chunk 第K帧
+                            linear_trajectory = torch.linspace(current_val, target_val_at_K, K,
+                                                              dtype=chunk.dtype, device=chunk.device)
+                            chunk[:K, i] = linear_trajectory
+
+                            # 第K+1帧到第N帧：保持原 chunk 不变（已经是原chunk的值，不需要修改）
+                            print(f"      前{K}帧插值到第{K}帧，后{chunk_size-K}帧保持原chunk不变")
+                        else:
+                            # chunk 总长度 <= K，全部插值到最后一帧
+                            target_val = float(original_chunk[-1, i])
+                            linear_trajectory = torch.linspace(current_val, target_val, chunk_size,
+                                                              dtype=chunk.dtype, device=chunk.device)
+                            chunk[:, i] = linear_trajectory
+                            print(f"      整个chunk({chunk_size}帧)全部插值")
+
+                print(f"✓ 完成降级处理，继续发送 chunk")
+            else:
+                # 第一次拒绝，继续尝试
+                if_continue = True
+                return None
+        else:
+            # 通过检查，重置计数器
+            reject_count = 0
+            print(f"✓ Chunk accepted: max joint diff = {max_diff:.4f}°")
+
 
     if chunk.shape[1] != len(ordered_keys):
         raise ValueError(
             f"Chunk action width ({chunk.shape[1]}) != action keys ({len(ordered_keys)})"
         )
+
+    # 在发送之前，检查并平滑每个关节的轨迹：如果中间有波峰/波谷偏离起点和终点超过 10 度，
+    # 将终点设置为该波峰/波谷的值，然后从起点线性插值到新终点
+    chunk_size = chunk.shape[0]
+    num_joints = chunk.shape[1]
+    wave_threshold_deg = 100.0
+
+    # 只检查前 14 个关节（排除 gripper）
+    arm_joint_count = min(14, num_joints)
+
+    for joint_idx in range(arm_joint_count):
+        # 提取该关节的完整轨迹
+        trajectory = chunk[:, joint_idx]
+
+        # 起点和终点
+        start_val = float(trajectory[0])
+        end_val = float(trajectory[-1])
+
+        # 找到轨迹中的最大值和最小值
+        max_val = float(trajectory.max())
+        min_val = float(trajectory.min())
+
+        # 检查波峰和波谷是否偏离起点和终点都超过 10 度
+        max_deviation = max(abs(max_val - start_val), abs(max_val - end_val))
+        min_deviation = max(abs(min_val - start_val), abs(min_val - end_val))
+
+        # 优先处理偏离更大的那个
+        if max_deviation > wave_threshold_deg and max_deviation >= min_deviation:
+            print(f"⚠️ Joint {joint_idx} ({ordered_keys[joint_idx] if joint_idx < len(ordered_keys) else joint_idx}): "
+                  f"peak {max_val:.2f}° deviates {max_deviation:.2f}° from endpoints")
+            print(f"   → 将终点改为 {max_val:.2f}°，线性插值: {start_val:.2f}° → {max_val:.2f}°")
+
+            # 从起点线性插值到波峰值
+            linear_trajectory = torch.linspace(start_val, max_val, chunk_size,
+                                              dtype=chunk.dtype, device=chunk.device)
+            chunk[:, joint_idx] = linear_trajectory
+
+        elif min_deviation > wave_threshold_deg:
+            print(f"⚠️ Joint {joint_idx} ({ordered_keys[joint_idx] if joint_idx < len(ordered_keys) else joint_idx}): "
+                  f"valley {min_val:.2f}° deviates {min_deviation:.2f}° from endpoints")
+            print(f"   → 将终点改为 {min_val:.2f}°，线性插值: {start_val:.2f}° → {min_val:.2f}°")
+
+            # 从起点线性插值到波谷值
+            linear_trajectory = torch.linspace(start_val, min_val, chunk_size,
+                                              dtype=chunk.dtype, device=chunk.device)
+            chunk[:, joint_idx] = linear_trajectory
 
     processed_actions: list[dict] = []
     for row in chunk:
@@ -349,6 +558,52 @@ def send_next_action_chunk(
             f"Robot '{robot.name}' does not implement send_action_chunk; "
             "chunk inference requires a robot that can dispatch an action chunk."
         )
+    # 记录 action chunk 到文件
+    chunk_dir = Path("/home/zzx23457/文档/test_chunk")
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    chunk_file = chunk_dir / "record_chunk.txt"
+
+    # 获取当前是第几个 chunk（通过读取文件行数）
+    if chunk_file.exists():
+        with open(chunk_file, "r") as f:
+            chunk_count = sum(1 for line in f if line.startswith("=== Chunk"))
+    else:
+        chunk_count = 0
+
+    chunk_count += 1
+
+    # 追加写入
+    with open(chunk_file, "a") as f:
+        f.write(f"=== Chunk {chunk_count} ===\n")
+
+        # 收集所有关节位置作为 robot state（按顺序）
+        joint_names = [
+            'left_arm_joint_1.pos', 'left_arm_joint_2.pos', 'left_arm_joint_3.pos',
+            'left_arm_joint_4.pos', 'left_arm_joint_5.pos', 'left_arm_joint_6.pos',
+            'left_arm_joint_7.pos', 'right_arm_joint_1.pos', 'right_arm_joint_2.pos',
+            'right_arm_joint_3.pos', 'right_arm_joint_4.pos', 'right_arm_joint_5.pos',
+            'right_arm_joint_6.pos', 'right_arm_joint_7.pos', 'left_gripper.pos',
+            'right_gripper.pos'
+        ]
+
+        robot_state = []
+        for joint in joint_names:
+            if joint in obs_raw:
+                robot_state.append(obs_raw[joint])
+            elif joint in obs_processed:
+                robot_state.append(obs_processed[joint])
+
+        if robot_state:
+            f.write(f"Robot State (16 joints): {robot_state}\n")
+        else:
+            f.write("Robot State: Not found in observation\n")
+
+        f.write(f"Actions ({len(processed_actions)} total):\n")
+        for i, action in enumerate(processed_actions):
+            # action 是 list/tuple，转成字符串写入
+            f.write(f"  Action {i}: {action}\n")
+        f.write("\n")
+
     robot.send_action_chunk(processed_actions)
     print("action_chunk 长度:", len(processed_actions))
     # Return the last action for telemetry/logging.

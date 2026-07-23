@@ -1,0 +1,91 @@
+# Replay Chunk Configuration for MarvainM6Http Robot (HTTP Interface)
+#
+# This config file is for replaying dataset episodes on the Marvain M6 robot
+# via HTTP API in chunk mode. The robot will execute recorded actions in batches
+# (chunks), waiting for the "need_new_chunk" signal before sending the next batch.
+
+# ============================================================================
+# Mode (deploy / replay / replay_chunk / camera_preview)
+# ============================================================================
+mode: replay_chunk
+
+# ============================================================================
+# Dataset Configuration
+# ============================================================================
+dataset:
+  # HuggingFace repo ID for the dataset
+  repo_id: datasets/26-06-26-10-35-39_v2
+
+  # Local dataset root (optional, avoids re-downloading from HuggingFace)
+  # Supports:
+  # - Absolute paths: /home/user/datasets/my_dataset
+  # - Relative paths: datasets/my_dataset
+  # - Bare names: my_dataset (resolves to <repo_root>/datasets/my_dataset)
+  root: datasets/26-07-20-06-08-43_v2
+
+  # Episode index to replay
+  episode: 0
+
+  # Dataset fps (not used for replay timing in chunk mode, only for metadata)
+  fps: 30
+
+# ============================================================================
+# Chunk Configuration
+# ============================================================================
+chunk:
+  # Number of actions per chunk
+  size: 100
+
+  # Poll interval in seconds for checking need_new_chunk signal
+  # Lower values = more responsive but higher CPU usage
+  # Recommended: 0.01 (10ms) to 0.05 (50ms)
+  poll_interval: 0.01
+
+# ============================================================================
+# Robot Configuration (HTTP Interface)
+# ============================================================================
+robot:
+  # Robot type (must be marvain_m6_http)
+  type: marvain_m6_http
+
+  # Robot instance ID
+  id: marvin_http_001
+
+  # HTTP API base URL
+  http_base_url: http://192.168.10.123:8010
+
+  # HTTP request timeout in seconds
+  timeout: 25.0
+
+  # Joint names (must match dataset configuration)
+  # 16 joints: 7 left arm + 7 right arm + 2 grippers
+  # Note: HTTP API only sends 14 arm joints; gripper commands are ignored
+  joint_names:
+    - left_arm_joint_1
+    - left_arm_joint_2
+    - left_arm_joint_3
+    - left_arm_joint_4
+    - left_arm_joint_5
+    - left_arm_joint_6
+    - left_arm_joint_7
+    - right_arm_joint_1
+    - right_arm_joint_2
+    - right_arm_joint_3
+    - right_arm_joint_4
+    - right_arm_joint_5
+    - right_arm_joint_6
+    - right_arm_joint_7
+    - left_gripper
+    - right_gripper
+
+# ============================================================================
+# Replay Settings
+# ============================================================================
+
+# Play audio announcement at start (requires pyttsx3 or espeak)
+play_sounds: false
+
+# Return to home position after replay completes
+# Note: For HTTP interface, this sends the robot to a standard home pose
+# but does not disable motors (motor control not exposed via HTTP)
+return_to_initial_position: true
