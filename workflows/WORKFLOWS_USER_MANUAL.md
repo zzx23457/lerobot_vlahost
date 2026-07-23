@@ -1018,4 +1018,4 @@ python workflows/robot_interaction/show_cameras.py --show-quad
 
 **最后更新**：2026-07-23  
 **对应代码版本**：lerobot_vlahost @ main  
-**核心 3 脚本**：`v2_convert_next_joint.py` → `train_act.sh` → `deploy.py`，其他都是被集成的子模块。
+**核心 3 脚本**：`v2_convert_next_joint.py` → `train_act.sh` → `deploy.py`
