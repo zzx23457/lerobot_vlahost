@@ -450,7 +450,7 @@ phase3_train() {
         --job_name="smolvla_${tag}" \
         --batch_size="$BATCH_SIZE" \
         --steps="$STEPS" \
-        --eval_freq="$EVAL_FREQ" \
+        --env_eval_freq="$EVAL_FREQ" \
         --save_freq="$SAVE_FREQ" \
         --log_freq="$LOG_FREQ" \
         --policy.device=cuda \

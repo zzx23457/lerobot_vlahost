@@ -14,14 +14,14 @@ mode: replay_chunk
 # ============================================================================
 dataset:
   # HuggingFace repo ID for the dataset
-  repo_id: datasets/26-06-26-10-35-39_v2
+  repo_id: datasets/26-07-23-09-31-04_v2
 
   # Local dataset root (optional, avoids re-downloading from HuggingFace)
   # Supports:
   # - Absolute paths: /home/user/datasets/my_dataset
   # - Relative paths: datasets/my_dataset
   # - Bare names: my_dataset (resolves to <repo_root>/datasets/my_dataset)
-  root: datasets/26-07-20-06-08-43_v2
+  root: datasets/26-07-23-09-31-04_v2
 
   # Episode index to replay
   episode: 0

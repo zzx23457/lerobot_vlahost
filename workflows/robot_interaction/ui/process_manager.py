@@ -11,6 +11,7 @@ the current ``UnifiedRobotConfig`` to a temp yaml and passes it as
 """
 
 import atexit
+import ctypes
 import os
 import queue
 import signal
@@ -25,6 +26,23 @@ from typing import Literal
 from .config_manager import UnifiedRobotConfig, dump_to_tempfile
 
 
+# Mirror deploy.py's _child_preexec so the rollout child sits in its own session
+# and gets SIGTERM if the Gradio parent is killed (avoids orphaning an energized
+# arm). deploy.py already does this for its grandchild; doing it here too means
+# the UI-launched child behaves identically to a directly-launched one.
+_PR_SET_PDEATHSIG = 1
+
+
+def _child_preexec() -> None:
+    os.setsid()
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+    except OSError:
+        # Non-Linux: best-effort only.
+        pass
+
+
 class ProcessManager:
     """Manages subprocess lifecycle for robot interaction workflows"""
 
@@ -33,6 +51,9 @@ class ProcessManager:
         self.log_queues: dict[str, queue.Queue] = {}
         self.log_buffers: dict[str, deque] = {}
         self.monitor_threads: dict[str, threading.Thread] = {}
+        # (log_path, file_handle) per process — needed so we can close the log
+        # file cleanly and tail it from the reader thread.
+        self._log_files: dict[str, tuple[Path, "typing.IO[bytes]"]] = {}
         self._current_process_name: str | None = None
 
         # Register cleanup on exit
@@ -43,23 +64,54 @@ class ProcessManager:
         workflows_dir = Path(__file__).parent.parent
         return workflows_dir / script_name
 
-    def _stream_output(self, process: subprocess.Popen, process_name: str):
-        """Stream process output to queue (runs in separate thread)"""
+    def _stream_output(self, process_name: str, log_path: Path):
+        """Tail the log file and append new lines to the in-memory buffer.
+
+        Method B: stdout/stderr go to a file (no kernel pipe → no backpressure).
+        We poll the file at ~50ms intervals; this is fast enough that the UI's
+        0.5s refresh timer always sees fresh lines.
+        """
         log_queue = self.log_queues[process_name]
         log_buffer = self.log_buffers[process_name]
-
+        pos = 0
         try:
-            # Read both stdout and stderr
-            for line in process.stdout:
-                line = line.decode("utf-8", errors="replace").rstrip()
-                log_queue.put(line)
-                log_buffer.append(line)
-
-                # Keep buffer at reasonable size (last 1000 lines)
-                if len(log_buffer) > 1000:
-                    log_buffer.popleft()
+            while True:
+                process = self.processes.get(process_name)
+                running = process is not None and process.poll() is None
+                pos = self._drain_log_file(log_path, pos, log_queue, log_buffer)
+                if not running:
+                    # Final drain after process exit
+                    self._drain_log_file(log_path, pos, log_queue, log_buffer)
+                    break
+                time.sleep(0.05)
         except Exception as e:
             log_queue.put(f"[ERROR] Log streaming error: {e}")
+
+    def _drain_log_file(
+        self,
+        log_path: Path,
+        pos: int,
+        log_queue: queue.Queue,
+        log_buffer: deque,
+    ) -> int:
+        """Read any new bytes from log_path since `pos` and feed lines to the buffer."""
+        try:
+            if not log_path.exists():
+                return pos
+            with open(log_path, "rb") as f:
+                f.seek(pos)
+                new_data = f.read()
+                new_pos = f.tell()
+            if new_data:
+                for line in new_data.splitlines():
+                    decoded = line.decode("utf-8", errors="replace").rstrip()
+                    log_queue.put(decoded)
+                    log_buffer.append(decoded)
+                    if len(log_buffer) > 1000:
+                        log_buffer.popleft()
+            return new_pos
+        except FileNotFoundError:
+            return pos
 
     def launch_deploy(self, config: UnifiedRobotConfig) -> tuple[bool, str]:
         """Launch deploy.py with config (serialized to a temp yaml)."""
@@ -149,24 +201,39 @@ class ProcessManager:
         self.log_queues[process_name] = queue.Queue()
         self.log_buffers[process_name] = deque(maxlen=1000)
 
+        # Method B: redirect stdout/stderr to a log file. Eliminates the kernel
+        # pipe → no 64KB backpressure, no GIL contention with the reader
+        # thread, identical behavior to a directly-launched deploy.py whose
+        # stdout happens to be a terminal.
+        # 4 层 parent：ui/ → robot_interaction/ → workflows/ → <REPO_ROOT>。
+        repo_root = Path(__file__).parent.parent.parent.parent
+        log_path = (repo_root / "outputs" / "deploy_logs" / f"{process_name}_{int(time.time())}.log").resolve()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_fh = open(log_path, "wb")
+        self._log_files[process_name] = (log_path, log_fh)
+
         try:
             # Launch process
+            # PYTHONUNBUFFERED=1 强制 rollout 端 stdout 行缓冲（每次 print 立即 flush），
+            # 配合 stdout=log_fh 让日志尽快落到磁盘文件里，UI 那边 50ms tail 一次。
+            child_env = os.environ.copy()
+            child_env["PYTHONUNBUFFERED"] = "1"
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=log_fh,
                 stderr=subprocess.STDOUT,
-                bufsize=0,  # 改为无缓冲，避免警告
-                cwd=Path(__file__).parent.parent.parent,  # Repository root
-                env=os.environ.copy(),
+                cwd=repo_root,  # Repository root
+                env=child_env,
+                preexec_fn=_child_preexec,  # 与直接跑 deploy.py 完全一致
             )
 
             self.processes[process_name] = process
             self._current_process_name = process_name
 
-            # Start log monitoring thread
+            # Start log monitoring thread (file tailer)
             monitor_thread = threading.Thread(
                 target=self._stream_output,
-                args=(process, process_name),
+                args=(process_name, log_path),
                 daemon=True,
             )
             monitor_thread.start()
@@ -179,9 +246,14 @@ class ProcessManager:
                 stderr = self.get_logs(process_name, last_n_lines=20)
                 return False, f"❌ Process failed to start:\n{stderr}"
 
-            return True, f"✅ {process_name} started successfully (PID: {process.pid})"
+            return True, f"✅ {process_name} started successfully (PID: {process.pid}, log: {log_path})"
 
         except Exception as e:
+            try:
+                log_fh.close()
+            except Exception:
+                pass
+            self._log_files.pop(process_name, None)
             return False, f"❌ Failed to launch {process_name}: {e}"
 
     def stop(self, process_name: str, timeout: float = 10.0) -> bool:
@@ -264,6 +336,13 @@ class ProcessManager:
 
         if process_name in self.monitor_threads:
             del self.monitor_threads[process_name]
+
+        if process_name in self._log_files:
+            log_path, log_fh = self._log_files.pop(process_name)
+            try:
+                log_fh.close()
+            except Exception:
+                pass
 
         if self._current_process_name == process_name:
             self._current_process_name = None

@@ -1046,8 +1046,9 @@ def create_app_zh():
             outputs=[exported_yaml],
         )
 
-        # 每 2 秒自动刷新日志
-        timer = gr.Timer(value=2, active=True)
+        # 每 0.5 秒自动刷新日志（直接跑 deploy.py 时终端是行缓冲秒刷，
+        # UI 这边之前 2 秒一次会让人感觉"指令迟钝"，调到 0.5s 让日志感知更跟手）
+        timer = gr.Timer(value=0.5, active=True)
         timer.tick(
             fn=refresh_logs,
             outputs=[log_output],

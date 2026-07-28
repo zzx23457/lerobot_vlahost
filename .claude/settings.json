@@ -220,7 +220,24 @@
       "Bash(curl -s -o /dev/null -w \"Main JS bundle: %{http_code} | size: %{size_download}\\\\n\" \"http://localhost:7860/assets/index-CU1DelDP.js\")",
       "Bash(curl -s -o /dev/null -w \"Main CSS bundle: %{http_code} | size: %{size_download}\\\\n\" \"http://localhost:7860/assets/index-BSZrXtnz.css\")",
       "Bash(curl -s -o /dev/null -w \"/gradio_api/: %{http_code}\\\\n\" http://localhost:7860/gradio_api/)",
-      "Bash(kill 1741256)"
+      "Bash(kill 1741256)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('workflows/robot_interaction/ui/process_manager.py'\\).read\\(\\)\\); print\\('process_manager.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('workflows/robot_interaction/ui/app_zh.py'\\).read\\(\\)\\); print\\('app_zh.py OK'\\)\")",
+      "Bash(ls -la /home/zzx23457/lerobot/datasets/26-07-23-09-31-04/ 2>&1 | head -30)",
+      "Read(//home/zzx23457/lerobot/datasets/26-07-23-09-31-04/**)",
+      "Bash(ls -la /home/zzx23457/lerobot/datasets/26-07-21+22-merged/ 2>&1 | head -30)",
+      "Read(//home/zzx23457/lerobot/datasets/26-07-21\\\\+22-merged/**)",
+      "Read(//home/zzx23457/lerobot/datasets/26-07-21\\\\+22-merged/meta/episodes/**)",
+      "Bash(echo \"=== 26-07-23-09-31-04 现状 ===\"; find /home/zzx23457/lerobot_vlahost/datasets/26-07-23-09-31-04 -maxdepth 4 -type f 2>&1 | head -20; echo; echo \"=== 26-07-21+22-merged 数据目录 ===\"; ls /home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged/data/ 2>&1; echo; echo \"=== 26-07-21+22-merged 视频目录 ===\"; ls /home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged/videos/ 2>&1; echo; echo \"=== 全盘找 26-07-21-14-14-22 / 26-07-22-15-45-02 ===\"; find /home/zzx23457 -maxdepth 5 -type d \\\\\\( -name \"26-07-21-14-14-22\" -o -name \"26-07-22-15-45-02\" \\\\\\) 2>/dev/null)",
+      "Bash(/home/zzx23457/miniconda3/envs/lerobot_vlahost/bin/python workflows/data_processing/merge_two_datasets.py)",
+      "Bash(python)",
+      "Bash(ls -t /home/zzx23457/lerobot_vlahost/datasets/.broken-26-07-21+22-merged-prefix-* 2>&1 | head -2; echo \"---\"; mv /home/zzx23457/lerobot_vlahost/datasets/.broken-26-07-21+22-merged-prefix-* /home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged 2>&1; echo \"restored\"; ls -la /home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged/meta/episodes/chunk-000/)",
+      "Bash(mv /home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged/.broken-26-07-21+22-merged-prefix-1784861557/* \\\\ *)",
+      "Bash(find /home/zzx23457 -maxdepth 5 -type d \\\\\\( -name \"lerobot_datasets-26-07-23-15-59-21\" -o -name \"lerobot_datasets-26-07-27-14-11-07\" \\\\\\) 2>/dev/null; echo \"---\"; ls -la /home/zzx23457/lerobot_vlahost/datasets/ | grep -E \"26-07\" | head -20)",
+      "Bash(bash -x ./train_act.sh env)",
+      "Bash(echo \"EXIT=$?\")",
+      "Read(//proc/driver/nvidia/**)",
+      "Bash(dpkg -l)"
     ],
     "additionalDirectories": [
       "/home/zzx23457/lerobot_vlahost/src/lerobot/robots",
@@ -230,7 +247,9 @@
       "/home/zzx23457/vlahost",
       "/home/zzx23457/vlahost/src/vlahost/vlahost",
       "/home/zzx23457/vlahost/src/vlahost/launch",
-      "/home/zzx23457/lerobot_vlahost/workflows"
+      "/home/zzx23457/lerobot_vlahost/workflows",
+      "/home/zzx23457/lerobot_vlahost/datasets",
+      "/home/zzx23457/lerobot_vlahost/datasets/26-07-21+22-merged/.broken-26-07-21+22-merged-prefix-1784861557"
     ]
   }
 }

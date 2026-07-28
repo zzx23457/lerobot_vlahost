@@ -28,7 +28,7 @@ python workflows/data_processing/v2_convert_next_joint.py
 # ==== 步骤 2：训练（一键 5 phase） ====
 DATASET_ROOT=datasets/<原名>_v2 \
 BATCH_SIZE=4 STEPS=100000 WANDB_ENABLE=false \
-    ./workflows/model_training/train_act.sh all
+    ./workflows/model_training/train_act.sh train
 # 自动做的事：
 #   ✓ 检查 GPU / ffmpeg / lerobot-train
 #   ✓ 检查数据集目录结构 + info.json + 交叉一致性
