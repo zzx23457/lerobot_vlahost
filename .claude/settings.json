@@ -237,7 +237,20 @@
       "Bash(bash -x ./train_act.sh env)",
       "Bash(echo \"EXIT=$?\")",
       "Read(//proc/driver/nvidia/**)",
-      "Bash(dpkg -l)"
+      "Bash(dpkg -l)",
+      "Bash(awk '/def build_config_from_ui/,/^    def [a-z]/' /home/zzx23457/lerobot_vlahost/workflows/robot_interaction/ui/app_zh.py)",
+      "Bash(awk -F: '{print $1}')",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('workflows/robot_interaction/ui/app_zh.py'\\).read\\(\\)\\); ast.parse\\(open\\('workflows/robot_interaction/ui/config_manager.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -m py_compile workflows/data_processing/merge_two_datasets.py)",
+      "Bash(python -m py_compile workflows/data_processing/v2_convert.py)",
+      "Bash(python workflows/data_processing/merge_two_datasets.py --help)",
+      "Bash(python workflows/data_processing/v2_convert.py --help)",
+      "Bash(/home/zzx23457/lerobot_vlahost/.venv/bin/python --version)",
+      "Bash(awk '{print $2}')",
+      "Bash(grep -vE \"^\\(os|sys|json|yaml|time|re|math|pathlib|argparse|threading|subprocess|typing|dataclasses|enum|collections|copy|functools|io|logging|tempfile|shutil|glob|asyncio|signal|traceback|contextlib|warnings|datetime|itertools|csv|hashlib|base64|urllib|http|inspect|ast|platform|stat|queue|toml|xml|webbrowser|socket|struct|weakref|operator|textwrap|pickle|gc|secrets|abc|cache|__future__|concurrent\\)$\")",
+      "Bash(grep -vE \"^\\(os|sys|json|yaml|time|re|math|pathlib|argparse|threading|subprocess|typing|dataclasses|enum|collections|copy|functools|io|logging|tempfile|shutil|glob|asyncio|signal|traceback|contextlib|warnings|datetime|itertools|csv|hashlib|base64|urllib|http|inspect|ast|platform|stat|queue|toml|xml|webbrowser|socket|struct|weakref|operator|textwrap|pickle|gc|secrets|abc|cache|__future__|concurrent|requests|atexit|ctypes|shlex|pyarrow|pyarrow\\\\.parquet|numpy|pandas|torch|cv2|gradio|fastapi|uvicorn|datasets|lerobot\\)$\")",
+      "Bash(grep -n \"case\\\\|phase\\\\|\\\\$1\\\\|all\\\\|env\\\\|check\\\\|smoke\\\\|train\\\\|eval\" workflows/model_training/finetune_act.sh)",
+      "Bash(grep -n \"case\\\\|^if\\\\|^\\\\$1\\\\|phase\" workflows/model_training/finetune_act.sh)"
     ],
     "additionalDirectories": [
       "/home/zzx23457/lerobot_vlahost/src/lerobot/robots",

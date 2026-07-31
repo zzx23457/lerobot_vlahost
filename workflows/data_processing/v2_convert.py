@@ -1,9 +1,11 @@
 """Convert v1 LeRobot v3 datasets to v2 schema (cleaned, joint-angle + gripper state).
 
-Reads `v2_convert_config.json` in the same directory to determine which datasets to
-process. For each entry in `config["datasets"]`:
-    v1 = <REPO_ROOT>/<dataset_name>
-    v2 = <REPO_ROOT>/<dataset_name><v2_suffix>   (default suffix "_v2")
+支持两种调用模式:
+1. **legacy 模式** (无 CLI): 读取同目录 `v2_convert_config.json` 处理全部声明数据集。
+   - 旧调用: `python3 workflows/v2_convert.py`
+2. **CLI 单任务模式** (新增, 非交互): 由 UI 或脚本驱动。
+   - `python3 workflows/v2_convert.py --dataset-root <v1_path> --output-root <v2_path> [--v2-suffix _v2] [--camera-enabled 0,1,1,1] [--dry-run]`
+   - 完全不修改 `v2_convert_config.json`。
 
 v1 → v2 transforms:
     - `action` (56,) → (16,): arm_command (14) + left_grip_next (1) + right_grip_next (1)
@@ -11,7 +13,7 @@ v1 → v2 transforms:
     - v1 angles are in **radians**; v2 angles are in **degrees** (× 180/π).
     - New column `action_is_pad` (bool) added (all False).
     - Videos are **symlinked** from v1 to save space.
-    - Cameras listed in config["cameras"] as 0 are dropped from the v2 output
+    - Cameras listed in --camera-enabled as 0 are dropped from the v2 output
       (videos dir, info.json features entry, stats.json top-level key, and the
       4 videos/<cam>/* columns in the episodes parquet). Missing key keeps
       all cameras (backward compatible). Order is fixed:
@@ -21,12 +23,16 @@ v1 is **never modified**; rollback for one dataset is `rm -rf <v2_dir>`.
 The v2 `.cache/` directory is removed on every successful run.
 
 Run from anywhere:
-    python3 workflows/v2_convert.py
+    python3 workflows/v2_convert.py                                    # legacy: read JSON config
+    python3 workflows/v2_convert.py --dataset-root datasets/foo --output-root datasets/foo_v2 \
+        --camera-enabled 0,1,1,1 --dry-run
 """
 
+import argparse
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -112,7 +118,7 @@ def convert_dataset(v1_root: Path, v2_root: Path, disabled_cameras: set[str] | N
                 f"      [camera] WARNING: v1 has unknown camera '{cam_dir}' "
                 f"(not in CAMERA_KEYS); keeping it. Update CAMERA_KEYS if you "
                 f"want to control this one via config.",
-                file=__import__("sys").stderr,
+                file=sys.stderr,
             )
 
     # Symlink loop with disabled-camera handling.
@@ -314,81 +320,171 @@ def convert_dataset(v1_root: Path, v2_root: Path, disabled_cameras: set[str] | N
 
 
 # ----------------------------------------------------------------------------
-# main
+# CLI / config resolution
 # ----------------------------------------------------------------------------
-def main() -> int:
-    if not CONFIG_PATH.exists():
-        print(f"ERROR: config not found: {CONFIG_PATH}", file=__import__("sys").stderr)
-        return 1
-    with open(CONFIG_PATH) as f:
-        config = json.load(f)
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI args. If --dataset-root is omitted, falls back to JSON config mode."""
+    parser = argparse.ArgumentParser(
+        description="v1 → v2 schema conversion. CLI 单任务模式 (新增) 或 JSON 配置模式 (旧兼容)。",
+    )
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        help="v1 数据集 root (CLI 单任务模式)。与 --output-root 配套使用。",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help="v2 数据集 root (CLI 单任务模式)。必须与 dataset-root 同 parent。",
+    )
+    parser.add_argument(
+        "--v2-suffix",
+        default="_v2",
+        help="当仅提供 --dataset-root 而未给 --output-root 时, 自动在 dataset-root 同级创建 "
+             "<name><suffix> 目录。默认 _v2。",
+    )
+    parser.add_argument(
+        "--camera-enabled",
+        type=str,
+        help="4 个相机的 0/1 序列 (按 CAMERA_KEYS 顺序)。例: '1,1,1,1'。0 表示丢弃该相机。"
+             "未提供则全部保留。",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只打印计划，不实际写入。",
+    )
+    return parser.parse_args(argv)
 
-    v2_suffix = config.get("v2_suffix", "_v2")
-    datasets  = config.get("datasets", [])
-    cameras   = config.get("cameras", None)  # None = keep all
 
-    if not datasets:
-        print(f"ERROR: config['datasets'] is empty in {CONFIG_PATH}", file=__import__("sys").stderr)
-        return 1
+def _parse_camera_enabled(raw: str | None) -> list[int] | None:
+    """Parse '0,1,1,1' style into [0,1,1,1], validating length and entries."""
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip() != ""]
+    if len(parts) != len(CAMERA_KEYS):
+        print(
+            f"ERROR: --camera-enabled must have exactly {len(CAMERA_KEYS)} "
+            f"comma-separated entries (got {len(parts)}: {raw!r})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    out: list[int] = []
+    for p in parts:
+        if p not in ("0", "1"):
+            print(
+                f"ERROR: --camera-enabled entries must be 0 or 1, got {raw!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        out.append(int(p))
+    return out
 
-    # Compute disabled_cameras from config["cameras"].
+
+def _resolve_jobs(args: argparse.Namespace) -> list[tuple[Path, Path, set[str]]]:
+    """Return [(v1_root, v2_root, disabled_cameras), ...] based on CLI or JSON config.
+
+    CLI 单任务模式优先级最高: 如果给了 --dataset-root 就只用它, 忽略 v2_convert_config.json。
+    """
+    cameras = _parse_camera_enabled(args.camera_enabled)
     if cameras is None:
         disabled_cameras: set[str] = set()
     else:
-        if not isinstance(cameras, list) or len(cameras) != len(CAMERA_KEYS):
-            print(
-                f"ERROR: config['cameras'] must be a list of length "
-                f"{len(CAMERA_KEYS)} (one entry per camera in CAMERA_KEYS), "
-                f"got {cameras!r}",
-                file=__import__("sys").stderr,
-            )
-            return 1
-        for v in cameras:
-            if v not in (0, 1):
-                print(
-                    f"ERROR: config['cameras'] entries must be 0 or 1, got {cameras!r}",
-                    file=__import__("sys").stderr,
-                )
-                return 1
         disabled_cameras = {
             _full_cam_key(name) for name, flag in zip(CAMERA_KEYS, cameras) if flag == 0
         }
 
+    if args.dataset_root:
+        # CLI 单任务模式
+        v1 = args.dataset_root
+        if args.output_root:
+            v2 = args.output_root
+        else:
+            v2 = v1.with_name(v1.name + args.v2_suffix)
+
+        if v1 == v2:
+            print(f"ERROR: --dataset-root and --output-root resolve to the same path: {v1}", file=sys.stderr)
+            sys.exit(1)
+        if v2.parent != v1.parent:
+            print(
+                f"ERROR: --dataset-root ({v1}) and --output-root ({v2}) "
+                f"must be siblings so videos/ can be symlinked back to v1.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return [(v1, v2, disabled_cameras)]
+
+    # Legacy JSON config 模式
+    if not CONFIG_PATH.exists():
+        print(f"ERROR: config not found: {CONFIG_PATH}", file=sys.stderr)
+        sys.exit(1)
+    with open(CONFIG_PATH) as f:
+        config = json.load(f)
+
+    v2_suffix = config.get("v2_suffix", "_v2")
+    datasets = config.get("datasets", [])
+    cfg_cameras = config.get("cameras", None)
+    if cfg_cameras is not None:
+        # Legacy mode uses JSON, which always reflects all four cameras.
+        # CLI --camera-enabled has already been applied to `disabled_cameras` above.
+        # If user gave both, prefer CLI.
+        if cameras is None:
+            disabled_cameras = {
+                _full_cam_key(name) for name, flag in zip(CAMERA_KEYS, cfg_cameras) if flag == 0
+            }
+
+    if not datasets:
+        print(f"ERROR: config['datasets'] is empty in {CONFIG_PATH}", file=sys.stderr)
+        sys.exit(1)
+
+    return [(DATASETS_ROOT / ds, (DATASETS_ROOT / ds).with_name(ds + v2_suffix), disabled_cameras)
+            for ds in datasets]
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    jobs = _resolve_jobs(args)
+
     print(f"Config: REPO_ROOT     = {REPO_ROOT}")
     print(f"        DATASETS_ROOT = {DATASETS_ROOT}")
-    print(f"        v2_suffix     = {v2_suffix!r}")
-    print(f"        camera order  = {CAMERA_KEYS}")
-    print(f"        cameras       = {cameras!r}  (None = all enabled)")
-    if disabled_cameras:
-        print(f"        disabled      = {sorted(disabled_cameras)}")
-    print(f"        datasets      = {len(datasets)}")
-    for d in datasets:
-        print(f"          - {d}")
+    cameras_repr = _parse_camera_enabled(args.camera_enabled)
+    print(f"        cameras       = {cameras_repr!r}  (None = all enabled)")
+    if any(j[2] for j in jobs):
+        print(f"        disabled      = {sorted(jobs[0][2])}")
+    print(f"        datasets      = {len(jobs)}")
+    for v1, v2, _ in jobs:
+        print(f"          - {v1.name} -> {v2.name}")
     print()
 
+    if args.dry_run:
+        print("(dry-run) nothing written.")
+        return 0
+
     rc = 0
-    for ds_name in datasets:
-        v1_root = DATASETS_ROOT / ds_name
-        v2_root = v1_root.with_name(v1_root.name + v2_suffix)
+    for v1_root, v2_root, disabled_cameras in jobs:
         print("=" * 72)
-        print(f" Converting: {ds_name}")
+        print(f" Converting: {v1_root.name}")
         print(f"   v1 = {v1_root}")
         print(f"   v2 = {v2_root}")
         print("=" * 72)
         if not v1_root.exists():
-            print(f"SKIP: v1 not found: {v1_root}", file=__import__("sys").stderr)
+            print(f"SKIP: v1 not found: {v1_root}", file=sys.stderr)
+            rc = 2
+            continue
+        if v2_root.exists():
+            print(f"SKIP: v2 already exists: {v2_root} (refusing to overwrite)", file=sys.stderr)
             rc = 2
             continue
         try:
             convert_dataset(v1_root, v2_root, disabled_cameras=disabled_cameras)
         except Exception as e:
-            print(f"FAILED on {ds_name}: {type(e).__name__}: {e}", file=__import__("sys").stderr)
+            print(f"FAILED on {v1_root.name}: {type(e).__name__}: {e}", file=sys.stderr)
             rc = 3
             continue
 
         # Final summary per dataset
         print()
-        print(f"   ✓ {ds_name}{v2_suffix}  ready at {v2_root}")
+        print(f"   ✓ {v2_root.name}  ready at {v2_root}")
         print(f"     rollback: rm -rf {v2_root}")
         print()
 

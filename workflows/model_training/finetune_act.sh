@@ -12,8 +12,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # 默认参数 —— 按需修改这里即可
-DEFAULT_PRETRAINED_CKPT="/home/zzx23457/lerobot_vlahost/outputs/train/act_finetune_v2_20260724_112426/checkpoints/200000/pretrained_model"
-DEFAULT_NEW_DATASET="datasets/26-07-21+22+25+25-merged_v2"  # 改成你的新数据集路径
+DEFAULT_PRETRAINED_CKPT="/home/zzx23457/lerobot_vlahost/outputs/train/act_26-07-21+22+23+25-merged_v2_20260725_024554/checkpoints/400000/pretrained_model"
+DEFAULT_NEW_DATASET="datasets/26-07-23+25-merged_v2"  # 改成你的新数据集路径
 
 # 使用环境变量或默认值
 PRETRAINED_CKPT="${PRETRAINED_CKPT:-$DEFAULT_PRETRAINED_CKPT}"
@@ -43,7 +43,7 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 # 训练参数
 BATCH_SIZE="${BATCH_SIZE:-8}"
-STEPS="${STEPS:-300000}"
+STEPS="${STEPS:-400000}"
 EVAL_FREQ="${EVAL_FREQ:-20000}"
 SAVE_FREQ="${SAVE_FREQ:-20000}"
 LOG_FREQ="${LOG_FREQ:-50}"

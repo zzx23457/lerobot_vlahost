@@ -17,7 +17,7 @@ mode: deploy
 policy:
   # Path to pretrained_model directory (relative or absolute)
   # path: /home/zzx23457/lerobot_files/outputs/train/act_v2_20260709_203755/checkpoints/200000/pretrained_model
-  path: /home/zzx23457/lerobot_vlahost/outputs/train/act_26-07-21+22+23+25-merged_v2_20260725_024554/checkpoints/400000/pretrained_model
+  path: /home/zzx23457/lerobot_vlahost/outputs/train/act_finetune_v2_20260730_143617/checkpoints/400000/pretrained_model
   # path: /home/zzx23457/lerobot/outputs/train/act_26-07-01-14-37-04_0111_v2_20260717_232743/checkpoints/050000/pretrained_model
   # path: /home/zzx23457/lerobot/outputs/train/act_26-07-01-14-37-04_0111_v2_20260718_011353/checkpoints/100000/pretrained_model
   # Inference device (cuda or cpu)
@@ -133,7 +133,7 @@ inference:
 
   # chunk mode parameters (only used when type=chunk)
   # Number of actions from each chunk to dispatch open-loop in one send.
-  n_action_steps: 60
+  n_action_steps: 80
   # Seconds to wait between successive chunk sends (open-loop hold time).
   chunk_interval_s: 8
 

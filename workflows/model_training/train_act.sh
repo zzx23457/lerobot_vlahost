@@ -14,12 +14,12 @@ set -euo pipefail
 
 # ============== 配置 ==============
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DATASET_ROOT="${DATASET_ROOT:-$PROJECT_ROOT/datasets/26-07-21+22+23+25+27-merged_v2}"
+DATASET_ROOT="${DATASET_ROOT:-$PROJECT_ROOT/datasets/26-07-21+22+23+25+25-merged_v2}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$PROJECT_ROOT/outputs/train}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 BATCH_SIZE="${BATCH_SIZE:-8}"
-STEPS="${STEPS:-200000}"
+STEPS="${STEPS:-400000}"
 EVAL_FREQ="${EVAL_FREQ:-20000}"
 SAVE_FREQ="${SAVE_FREQ:-20000}"
 LOG_FREQ="${LOG_FREQ:-50}"
@@ -419,6 +419,7 @@ phase3_train() {
     # 构建训练命令参数
     local train_args=(
         --policy.type=act
+        --dataset.image_transforms.enable=true
         --dataset.repo_id=local
         --dataset.root="$DATASET_ROOT"
         --dataset.video_backend=pyav
