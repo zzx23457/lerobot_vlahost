@@ -53,6 +53,7 @@ python workflows/robot_interaction/deploy.py --policy-path "$CKPT"
 
 - **训练做了什么**：继续看 [§3.2 train_act.sh](#32-train_actsh--act-一键训练-推荐)
 - **部署做了什么**：继续看 [§3.3 deploy.py](#33-deploypy--策略部署主入口)
+- **想用浏览器控制台（部署/回放/相机/数据处理/训练全包）**：看 [§3.4 UI 控制台（Gradio）](#34-ui-控制台gradio可选)
 - **v1 → v2 转换做了什么**：继续看 [§3.1 v2_convert_next_joint.py](#31-v2_convert_next_jointpy--v1--v2-schema-转换)
 - **要换数据集 / 换模型 / 改频率**：看 [§6 参数替换速查表](#6-参数替换速查表)
 - **遇到报错**：看 [§7 常见故障排查](#7-常见故障排查)
@@ -419,6 +420,256 @@ python workflows/robot_interaction/deploy.py \
 
 ---
 
+### 3.4 UI 控制台（Gradio，可选）
+
+> 给"不想记命令"的同事用——把 `deploy.py` / `replay.py` / `show_cameras.py` /
+> 5 个数据处理脚本 / 3 个训练脚本全部包到一个 Web 控制台里。
+>
+> **核心原则**：**YAML 是真相源**。UI 内部就是「把当前 YAML 写到
+> `tempfile/robot_config_*.yaml` → 用 `--config <tmp>` 调对应脚本」。
+> 表单只是结构化视图，可以直接在 YAML Tab 里改文本。
+
+#### 3.4.1 安装与启动
+
+```bash
+# 一次性安装（仅 UI 依赖）
+uv sync --extra ui
+
+# 启动（会自动清掉 ALL_PROXY 等 socks 代理以免 gradio 报错）
+python workflows/robot_interaction/ui/launch.py
+
+# 或
+python -m workflows.robot_interaction.ui.launch
+```
+
+启动后终端会打印：
+
+```
+🚀 启动 LeRobot 统一控制界面（yaml-centric）
+📍 访问地址: http://localhost:7860
+🌐 局域网访问: http://<本机IP>:7860
+```
+
+> UI 默认监听 `0.0.0.0:7860`，**局域网别的电脑也能访问**——给机器人旁边
+> 没用过终端的同事留浏览器就行。
+
+#### 3.4.2 5 种操作模式
+
+顶部"操作模式"切换：
+
+| 模式 | 底层脚本 | 适合场景 |
+|---|---|---|
+| **部署** | `deploy.py --config <tmp>` | 训好的策略上真机（ACT / SmolVLA / 其他） |
+| **回放** | `replay.py --config <tmp>` | 数据集里某条 episode 在真机上重放 |
+| **相机预览** | `show_cameras.py --config <tmp>` | 不带 deploy 的相机实时预览（4 路切分） |
+| **数据处理** | 5 个脚本分派 | 烟测 / 清洗 / 合并 / 时间戳对齐 / v2 转换 |
+| **模型训练** | `train_act.sh` / `train_smolvla.sh` / `finetune_act.sh` | 在浏览器里启动训练 |
+
+切换模式时，**"加载预设配置"下拉菜单会自动过滤**——只显示该模式可用的 yaml 模板与用户保存的预设。
+
+#### 3.4.3 顶部控件（所有模式通用）
+
+```
+┌─────────────────────────┬──────────────────────────────────────┐
+│ 操作模式  [部署▼]       │ 加载预设配置 [deploy_config_chunk▼] │
+│                         │ 预设名称 [_________________]         │
+│                         │ [💾 保存预设] [📥 导出 YAML]        │
+└─────────────────────────┴──────────────────────────────────────┘
+```
+
+- **加载预设配置**：下拉里 = `workflows/robot_interaction/` 下所有 `.yaml`
+  模板（`deploy_config_chunk` / `deploy_config_hybrid` / `replay_config` …）
+  + 你之前用"💾 保存预设"存到 `ui/presets/<kind>/` 的自定义预设
+  （带"(预设)"后缀）。切换操作模式时自动重新过滤。
+- **💾 保存预设**：把当前 YAML 写到 `ui/presets/<kind>/<name>.yaml`，
+  重启 UI 后会自动出现在下拉里。
+- **📥 导出 YAML**：把当前最终配置复制到一个只读文本框，
+  方便贴到 issue / commit message。
+
+#### 3.4.4 部署模式详解
+
+适用：训好的策略上真机推理。
+
+**典型流程：部署 ACT**
+
+1. 顶部模式选 **"部署"**；
+2. "加载预设配置"下拉选 `deploy_config_chunk`（开环 chunk 模式，默认）；
+3. **策略设置** 面板：
+   - "选择训练目录"下拉选 `act_v2_20260701_181934` 之类的 run；
+   - "选择 Checkpoint" 下拉选 `190000` / `last` 等；
+   - 模型路径会自动填到 `policy.path`（也可手动覆盖）；
+   - 推理设备默认 `cuda`。
+4. **机器人设置** 面板：确认 `http_base_url = http://192.168.10.123:8010` /
+   `robot.id` 与训练时一致；
+5. **推理设置** 面板（默认折叠）：
+   - `FPS`：默认 30；
+   - `Strategy`：base / sentry（边推理边录）/ highlight / dagger / episodic；
+   - `Inference Type`：sync / rtc / chunk；
+   - 选 `rtc` 时，下方 RTC 子面板（Execution Horizon / Max Guidance Weight）自动展开；
+   - `Show Camera Windows`：勾选 → 同 deploy 一起拉起 `show_cameras.py`；
+   - `Camera Rename Map (Advanced)`：VLA 模型必填
+     （如 `{"right_eye":"camera1", "left_wrist":"camera2", "right_wrist":"camera3"}`）。
+6. **数据集设置（部署）** 面板（默认隐藏）：VLA 模型必填 `single_task`；
+   `sentry` 等录制策略必填 `repo_id` / `root`。
+7. 点 **🚀 启动** → UI 内部 = `deploy.py --config <tempfile>`；
+   下方"实时日志"面板开始滚。
+8. 点 **🛑 停止** → 杀进程组 + `_robot_home.py` 自动送 home。
+
+**典型流程：部署 SmolVLA**
+
+跟 ACT 几乎一样，区别只有：
+
+- "Camera Rename Map (Advanced)"必填且通常更长；
+- "数据集设置（部署）"必须填 `single_task`（自然语言任务描述）。
+- `inference.type` 一般用 `rtc` 或 `chunk`。
+
+> **YAML Tab vs 表单 Tab**：表单只是结构化视图。改完表单要
+> 点 **"🔄 从表单刷新 → YAML"** 才会写入；改完 YAML 要点
+> **"📋 YAML → 应用到表单"** 才会同步到表单。直接点启动会用 YAML 当前内容。
+
+#### 3.4.5 回放模式详解
+
+适用：把数据集里某条 episode 的动作在真机上重放。
+
+1. 模式切到 **"回放"**；
+2. 加载 `replay_config`；
+3. YAML Tab 里改：
+   - `dataset.repo_id`（或 `dataset.root` 走本地路径）；
+   - `dataset.episode`（要回放的 episode 编号）；
+   - `inference.fps`（回放频率）；
+   - `return_to_initial_position`（退出后是否送 home）。
+4. 点 **🚀 启动** → 调 `replay.py`。
+
+#### 3.4.6 相机预览模式详解
+
+适用：不带 deploy 的纯相机预览（4 路切分窗口）。
+
+1. 模式切到 **"相机预览"**；
+2. "相机设置"表单：选要显示的相机（默认 4 路全开）、FPS、窗口大小；
+3. 点 **"🔄 从表单刷新 → YAML"** → 写入 yaml；
+4. 点 **🚀 启动** → 调 `show_cameras.py`。
+   - 物理相机名 / FPS / 窗口大小走 CLI；
+   - `robot.http_base_url` / `policy.path` 走 yaml（policy 用于推导相机列表）。
+
+#### 3.4.7 数据处理模式详解
+
+切到 **"数据处理"** 后，"操作"下拉选 5 种之一：
+
+| 操作 | 底层脚本 | 关键参数 | 注意点 |
+|---|---|---|---|
+| **数据集烟测** | `sanity_check.py` | `n_samples`（默认 5） | 退出码 0 = 通过；1 = 有错（请勿继续训练） |
+| **清洗脏 Episode** | `clean_dirty_episodes.py` | `dry_run`（默认勾选）/ `report_only` / `zero_threshold` | **默认 dry-run**；输入与输出不能同路径 |
+| **合并数据集** | `merge_two_datasets.py` | `source_roots_text`（每行一个，至少 2 个）/ `merge_repo_id` / `merge_video_size_mb` | **输出目录不能已存在**（防误覆盖） |
+| **时间戳对齐检查** | `check_timestamp_alignment.py` | `video_key`（留空自动检测）/ `tolerance_ms` / `output_format` | 退出码 1 = 发现 drift（**业务结果，不是错误**，UI 视为成功） |
+| **v2 Schema 转换** | `v2_convert.py` | `v2_variant`（standard / next_joint）/ 4 个相机复选框 / `v2_dry_run`（默认勾选） | v1 永不被修改；rollback = `rm -rf <v2_dir>` |
+
+> **安全约束**：所有写操作（清洗 / 合并 / v2 转换）**默认 dry-run**。
+> 实际写入前必须**手动取消勾选 Dry-run**——这是为了防止"点了启动就开干"。
+
+#### 3.4.8 模型训练模式详解
+
+切到 **"模型训练"** 后选训练脚本 + 阶段：
+
+| 训练脚本 | 底层命令 | 专属参数 |
+|---|---|---|
+| **ACT** | `bash train_act.sh <phase>` | 通用超参（BATCH_SIZE / STEPS / EVAL_FREQ / SAVE_FREQ / LOG_FREQ）+ WANDB_ENABLE / PUSH_TO_HUB |
+| **SmolVLA** | `bash train_smolvla.sh <phase>` | 同 ACT + POLICY_CHUNK_SIZE / POLICY_N_ACTION_STEPS / POLICY_LR / POLICY_PATH / LOAD_VLM_WEIGHTS / FREEZE_VISION_ENCODER / TRAIN_EXPERT_ONLY / HF_ENDPOINT / RENAME_MAP |
+| **ACT Fine-tune** | `bash finetune_act.sh` | PRETRAINED_CKPT + NEW_DATASET（**没有 phase dispatch**，总是跑完整训练） |
+
+| 阶段 | 含义 |
+|---|---|
+| `env` | 仅检查环境（GPU / 依赖），不启动训练 |
+| `check` | 仅校验数据集（4 条规则），不启动 |
+| `smoke` | 50 步烟测，建议第一次跑 |
+| `train` | 正式训练（默认 400k 步） |
+| `all` | env + check + smoke + train + eval（**一键 5 phase**） |
+| `eval` | 仅打印评估命令（不评估模型） |
+
+> **环境变量白名单**：训练通过 `bash` 子进程启动，环境变量走白名单注入
+> （不会污染 Gradio 主进程）。所有训练日志写到
+> `outputs/deploy_logs/model_training_<script>_<phase>_<ts>.log`。
+>
+> **点停止 = `killpg`**：会终止整个 bash 派生进程组（含 `lerobot-train` 后代）。
+
+#### 3.4.9 YAML ↔ 表单 双向同步
+
+UI 内部把 yaml 解析成 `UnifiedRobotConfig` dataclass（5 种 mode-aware），
+再渲染成表单；改完表单再序列化成 yaml。
+
+- **改完表单** → 必须点 **"🔄 从表单刷新 → YAML"** → 否则 yaml 不变；
+- **改完 YAML** → 必须点 **"📋 YAML → 应用到表单"** → 否则表单与 yaml 不一致；
+- **直接点 🚀 启动** → 用 YAML 当前内容（不看表单）。
+
+`mode: deploy` vs `mode: replay` 的字段位置略有差异（`return_to_initial_position`
+deploy 在 `inference.*`，replay 在 yaml 根）——UI 的 `save_yaml` / `load_yaml` 自动做
+mode-aware 转换，无需手动调整。
+
+#### 3.4.10 关键安全约束（架构层）
+
+```
+Gradio Web UI (app_zh.py)
+   │  YAML 是真相源; 表单是结构化视图
+   ▼
+config_manager (yaml ⇄ dataclass 双向转换)
+   │
+   ▼
+process_manager (写 yaml 到 tempfile + 启子进程)
+   │  脚本路径 / 环境变量走白名单 (21 个 key)
+   │  bash 训练用 setsid() 自建进程组, stop 用 killpg 杀整组
+   ▼
+deploy.py / replay.py / show_cameras.py / 5 数据处理脚本 / 3 训练脚本
+```
+
+- **白名单**：UI 不会注入任意命令或任意环境变量——脚本路径写死，训练 env 只注入
+  21 个已批准的 key（`DATASET_ROOT` / `BATCH_SIZE` / `STEPS` / `WANDB_*` 等）。
+- **资源隔离**：bash 训练用 `os.setsid()` 自建进程组，stop 用 `killpg` 杀整组。
+- **dry-run 默认开**：清洗 / 合并 / v2 转换默认 `dry_run=True`。
+- **YAML schema 不变**：旧 `deploy_config*.yaml` / `replay_config.yaml` 兼容加载（带 warning 容错过滤）。
+
+#### 3.4.11 常见问题
+
+**Q: UI 起不来？**
+
+```bash
+# 1) 检查 gradio 版本
+pip list | grep gradio   # 需要 >=4.0,<6.0
+
+# 2) socks 代理冲突（launch.py 已自动清，但有时环境变量还会被 set）
+unset ALL_PROXY all_proxy HTTP_PROXY HTTPS_PROXY
+python workflows/robot_interaction/ui/launch.py
+
+# 3) 端口被占
+lsof -i :7860   # 找到 PID 杀掉
+```
+
+**Q: 启动按钮按了但子脚本立刻挂了？**
+
+看下方"实时日志"面板。常见：
+
+- 模型路径不存在 → `FileNotFoundError`：检查"选择 Checkpoint"选了没；
+- 机器人 HTTP 不通 → `Connection refused`：`curl http://192.168.10.123:8010/state` 验证；
+- VLA 模型没 `single_task` → 报 schema 校验错：填上任务描述。
+
+**Q: 表单改了但 yaml 不动？**
+
+忘了点 **"🔄 从表单刷新 → YAML"**。改完表单再点这个按钮才生效。
+
+**Q: yaml 改了但表单不变？**
+
+忘了点 **"📋 YAML → 应用到表单"**。
+
+**Q: 想用别的电脑访问？**
+
+UI 默认监听 `0.0.0.0`，**同局域网**浏览器访问 `http://<本机IP>:7860` 即可。
+跨网段需要端口转发或 VPN。
+
+**Q: 训练中点停止进程没退干净？**
+
+先等 5–10 秒——`killpg` 是把整个 bash 派生进程组（含 `lerobot-train` 子代）一起终止，
+有时 GPU 释放需要几秒。如果 30 秒后还没退，开终端 `ps -ef | grep lerobot-train` 找 PID。
+
+---
+
 ## 4. 端到端范例（复制粘贴就能跑）
 
 ### 4.1 完整链路：v1 数据集 → 转换 → 训练 → 部署
@@ -491,6 +742,9 @@ python workflows/robot_interaction/ui/launch.py
 # 4. 看下方日志
 # 5. 退出时点 🛑 Stop（自动送 home）
 ```
+
+> UI 内置 **5 种模式**（部署 / 回放 / 相机预览 / 数据处理 / 模型训练），
+> 完整用法见 [§3.4 UI 控制台（Gradio）](#34-ui-控制台gradio可选)。
 
 ### 4.5 SmolVLA 训练（结构与 ACT 类似）
 
@@ -741,22 +995,23 @@ cfg = load_config(Path("deploy_config.yaml"))
 
 ### 5.4 UI 子模块（可选）
 
-`workflows/robot_interaction/ui/` 是 Gradio Web 控制台，包装 `deploy.py` / `replay.py` / `show_cameras.py`。架构：
+`workflows/robot_interaction/ui/` 是 Gradio Web 控制台，包装 `deploy.py` / `replay.py` / `show_cameras.py` + 5 个数据处理脚本 + 3 个训练脚本。架构：
 
 ```
 Gradio Web UI (launch.py)
     │  YAML 是真相源;表单是结构化视图
     ▼
-config_manager (yaml / dataclass 双向转换)
+config_manager (yaml / dataclass 双向转换, 5 mode-aware)
     │
     ▼
 process_manager (写 yaml 到 tempfile + 启子进程)
-    │
+    │  脚本路径 / 环境变量走白名单 (21 个 key)
+    │  bash 训练用 setsid() 自建进程组, stop 用 killpg 杀整组
     ▼
-deploy.py / replay.py / show_cameras.py --config <tmp>
+deploy.py / replay.py / show_cameras.py / 5 数据处理脚本 / 3 训练脚本
 ```
 
-详见 [`ui/快速开始.md`](robot_interaction/ui/快速开始.md)。
+**用法见 [§3.4 UI 控制台（Gradio）](#34-ui-控制台gradio可选)**；底层实现详见 [`ui/快速开始.md`](robot_interaction/ui/快速开始.md)。
 
 ---
 
@@ -930,6 +1185,9 @@ unset ALL_PROXY all_proxy HTTP_PROXY HTTPS_PROXY
 lsof -i :7860
 ```
 
+更详细的 UI 排查（含子脚本启动失败 / yaml-表单同步 / 跨网段访问）见
+[§3.4.11 常见问题](#3411-常见问题)。
+
 ### 7.10 相机预览窗口是黑的
 
 ```bash
@@ -975,7 +1233,7 @@ python workflows/robot_interaction/show_cameras.py --show-quad
 | [`GET_STATE_README.md`](GET_STATE_README.md) | `get_robot_state.py` 详细用法 |
 | [`HTTP_CONTROL_README.md`](HTTP_CONTROL_README.md) | `arm_control_http.py` 详细用法 |
 | [`README_HOME_CONFIG.md`](README_HOME_CONFIG.md) | home 姿态配置 |
-| [`robot_interaction/ui/快速开始.md`](robot_interaction/ui/快速开始.md) | Gradio UI 详细用法 |
+| [`robot_interaction/ui/快速开始.md`](robot_interaction/ui/快速开始.md) | Gradio UI 底层实现参考（用法见 [§3.4](#34-ui-控制台gradio可选)） |
 | [`data_processing/README.md`](data_processing/README.md) | 数据清洗工具详细文档 |
 | [`data_processing/QUICKREF.md`](data_processing/QUICKREF.md) | 数据清洗快速参考 |
 | [`data_processing/数据清洗分析总结.md`](data_processing/数据清洗分析总结.md) | 历史案例分析报告 |
@@ -1012,7 +1270,7 @@ python workflows/robot_interaction/show_cameras.py --show-quad
 | `train_smolvla.sh` | 训 SmolVLA 时 |
 | `finetune_act.sh` | 跨数据集 / 继续训 |
 | `run_three_datasets.sh` | 临时脚本（用完删） |
-| `ui/launch.py` | 想用 Gradio 控制台 |
+| `ui/launch.py` | 想用 Gradio 控制台（用法见 [§3.4](#34-ui-控制台gradio可选)） |
 
 ---
 
